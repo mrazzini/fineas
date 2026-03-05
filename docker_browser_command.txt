@@ -1,9 +1,0 @@
-docker run -d \
-  --name chromium-gui \
-  -p 6080:6080 \
-  -e PUID=1000 \
-  -e PGID=1000 \
-  -e TZ=Etc/UTC \
-  -e CHROME_CLI=https://google.com \
-  --shm-size="2gb" \
-  lscr.io/linuxserver/chromium:latest
