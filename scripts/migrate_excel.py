@@ -283,7 +283,7 @@ async def seed_goals(session: AsyncSession) -> None:
         await session.execute(
             text("""
                 INSERT INTO goals (name, description, target_amount, target_date, goal_type, asset_scope)
-                VALUES (:name, :description, :target_amount, :target_date, :goal_type, :asset_scope::jsonb)
+                VALUES (:name, :description, :target_amount, :target_date, :goal_type, CAST(:asset_scope AS jsonb))
                 ON CONFLICT DO NOTHING
             """),
             goal,
@@ -317,18 +317,17 @@ async def verify(session: AsyncSession) -> bool:
     else:
         log.info("PASS: Fonchim has 1 snapshot")
 
-    # 3. Latest net worth (active assets, most recent date)
+    # 3. Latest net worth — sum of the most-recent snapshot per active asset
     result = await session.execute(
         text("""
-            SELECT SUM(s.amount)
-            FROM snapshots s
-            JOIN assets a ON s.asset_id = a.id
-            WHERE a.is_active = true
-              AND s.date = (
-                SELECT MAX(s2.date) FROM snapshots s2
-                JOIN assets a2 ON s2.asset_id = a2.id
-                WHERE a2.is_active = true
-              )
+            SELECT SUM(latest.amount)
+            FROM (
+                SELECT DISTINCT ON (s.asset_id) s.amount
+                FROM snapshots s
+                JOIN assets a ON s.asset_id = a.id
+                WHERE a.is_active = true
+                ORDER BY s.asset_id, s.date DESC
+            ) AS latest
         """)
     )
     total = float(result.scalar() or 0)
