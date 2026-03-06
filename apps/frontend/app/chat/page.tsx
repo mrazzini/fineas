@@ -17,6 +17,9 @@ export default function ChatPage() {
           <Link href="/projections" className="text-muted-foreground hover:text-foreground">
             Projections
           </Link>
+          <Link href="/data" className="text-muted-foreground hover:text-foreground">
+            Data
+          </Link>
         </nav>
       </header>
 

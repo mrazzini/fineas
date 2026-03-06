@@ -43,7 +43,7 @@ export function SnapshotTable({ holdings }: Props) {
           <TableHead>Type</TableHead>
           <TableHead className="text-right">Value</TableHead>
           <TableHead className="text-right">Alloc %</TableHead>
-          <TableHead className="text-right">Change</TableHead>
+          <TableHead className="text-right">Change (vs prev)</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

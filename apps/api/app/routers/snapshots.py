@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -35,7 +35,7 @@ async def get_latest_snapshots(
     result = await session.execute(latest_stmt)
     latest_snapshots = list(result.scalars().all())
 
-    total = sum(s.amount for s in latest_snapshots)
+    total = float(sum(s.amount for s in latest_snapshots))
     as_of = max((s.date for s in latest_snapshots), default=date.today())
 
     # Get previous snapshot per asset for delta calculation
@@ -80,14 +80,37 @@ async def get_latest_snapshots(
 async def get_net_worth_history(
     session: AsyncSession = Depends(get_session),
 ) -> list[NetWorthHistory]:
-    """Net worth time series grouped by date."""
-    stmt = (
-        select(Snapshot.date, func.sum(Snapshot.amount).label("total"))
-        .join(Asset, Snapshot.asset_id == Asset.id)
-        .where(Asset.is_active.is_(True))
-        .group_by(Snapshot.date)
-        .order_by(Snapshot.date)
-    )
+    """Net worth time series with fill-forward per asset, excluding partial-asset dates."""
+    stmt = text("""
+        WITH snapshot_dates AS (
+            SELECT s.date
+            FROM snapshots s
+            JOIN assets a ON s.asset_id = a.id
+            WHERE a.is_active = true
+            GROUP BY s.date
+            HAVING COUNT(DISTINCT s.asset_id) > 1
+        ),
+        filled AS (
+            SELECT
+                sd.date,
+                (
+                    SELECT s2.amount
+                    FROM snapshots s2
+                    WHERE s2.asset_id = a.id
+                      AND s2.date <= sd.date
+                    ORDER BY s2.date DESC
+                    LIMIT 1
+                ) AS amount
+            FROM snapshot_dates sd
+            CROSS JOIN assets a
+            WHERE a.is_active = true
+        )
+        SELECT date, ROUND(SUM(amount), 2) AS total
+        FROM filled
+        WHERE amount IS NOT NULL
+        GROUP BY date
+        ORDER BY date
+    """)
     result = await session.execute(stmt)
     rows = result.all()
     return [NetWorthHistory(date=row.date, total=float(row.total)) for row in rows]
@@ -109,6 +132,34 @@ async def list_snapshots(
         stmt = stmt.where(Snapshot.date <= to_date)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+@router.put("/{snapshot_id}", response_model=SnapshotResponse)
+async def update_snapshot(
+    snapshot_id: uuid.UUID,
+    payload: SnapshotCreate,
+    session: AsyncSession = Depends(get_session),
+) -> Snapshot:
+    snap = await session.get(Snapshot, snapshot_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    snap.amount = payload.amount
+    snap.date = payload.date
+    await session.commit()
+    await session.refresh(snap)
+    return snap
+
+
+@router.delete("/{snapshot_id}", status_code=204)
+async def delete_snapshot(
+    snapshot_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    snap = await session.get(Snapshot, snapshot_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    await session.delete(snap)
+    await session.commit()
 
 
 @router.post("/", response_model=SnapshotResponse, status_code=201)

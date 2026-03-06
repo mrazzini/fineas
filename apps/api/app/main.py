@@ -1,6 +1,10 @@
+import asyncio
 from contextlib import asynccontextmanager
+from functools import partial
 
 import structlog
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,6 +18,11 @@ log = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Run migrations in a thread so Alembic's asyncio.run() can create its own
+    # event loop — calling asyncio.run() inside uvicorn's already-running loop crashes.
+    alembic_cfg = Config("/app/alembic.ini")
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, partial(command.upgrade, alembic_cfg, "head"))
     log.info("startup", env=settings.APP_ENV)
     yield
     await engine.dispose()
@@ -27,10 +36,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+cors_origins = ["*"] if settings.APP_ENV != "production" else settings.cors_origins_list
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=False,  # must be False when allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )

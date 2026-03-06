@@ -2,7 +2,7 @@
 Agent Orchestrator — Phase 1.
 
 Single LLM call classifies user intent, then routes to the appropriate agent.
-Manages per-conversation graph state for the WebSocket lifecycle.
+Manages per-conversation graph config for the WebSocket lifecycle.
 """
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from typing import Any
 from fastapi import WebSocket
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.update_agent import UpdateAgentState, build_update_graph
@@ -23,9 +22,8 @@ from app.database import AsyncSessionLocal
 
 log = logging.getLogger(__name__)
 
-# In-memory store of active graphs per conversation_id
-# In production this would use Redis/PostgreSQL-backed checkpointer
-_active_graphs: dict[str, Any] = {}
+# Per-conversation LangGraph config (thread_id → config dict)
+# Graphs are rebuilt per-call with a fresh session but share _CHECKPOINTER
 _active_configs: dict[str, dict] = {}
 
 
@@ -84,8 +82,7 @@ async def handle_message(
         if intent == "update":
             await _run_update_agent(websocket, message, conversation_id, session)
         else:
-            # General response for Phase 1 (other agents in Phase 2+)
-            await _general_response(websocket, message, intent)
+            await _general_response(websocket, message, intent, session)
 
 
 async def _run_update_agent(
@@ -94,9 +91,8 @@ async def _run_update_agent(
     conversation_id: str,
     session: AsyncSession,
 ) -> None:
-    """Start or continue an Update Agent run."""
+    """Start an Update Agent run and pause at the confirmation interrupt."""
     graph = build_update_graph(session)
-    _active_graphs[conversation_id] = graph
 
     config = {"configurable": {"thread_id": conversation_id}}
     _active_configs[conversation_id] = config
@@ -113,44 +109,48 @@ async def _run_update_agent(
         error=None,
     )
 
-    # Stream events until interrupt or END
+    # Consume all events until the graph pauses (interrupt_before) or finishes
     async for event in graph.astream(initial_state, config, stream_mode="values"):
-        # Check if we hit the confirmation interrupt
-        if "__interrupt__" in event or event.get("deltas") and not event.get("user_confirmed"):
-            deltas = event.get("deltas", [])
-            anomalies = event.get("anomalies", [])
+        pass
 
-            if deltas:
-                # Find the last assistant message
-                msgs = event.get("messages", [])
-                confirmation_text = msgs[-1]["content"] if msgs else "Please review the changes below."
+    # After the stream ends, check if the graph is paused at an interrupt
+    state = await graph.aget_state(config)
 
-                await websocket.send_json({
-                    "type": "confirmation_request",
-                    "content": confirmation_text,
-                    "data": {
-                        "updates": deltas,
-                        "anomalies": anomalies,
-                        "snapshot_date": event.get("snapshot_date"),
-                    },
-                })
-                return  # Pause — wait for confirmation_response
-
-    # If we reach here with no interrupt, check for error or completion
-    # This handles the case where parse found nothing
-    final_state = await graph.aget_state(config)
-    if final_state and final_state.values:
-        v = final_state.values
+    if state.next:
+        # Graph is paused — present the confirmation request
+        v = state.values
+        msgs = v.get("messages", [])
+        last_assistant = next(
+            (m["content"] for m in reversed(msgs) if m["role"] == "assistant"),
+            "Please review the proposed changes below.",
+        )
+        await websocket.send_json({
+            "type": "confirmation_request",
+            "content": last_assistant,
+            "data": {
+                "updates": v.get("deltas", []),
+                "anomalies": v.get("anomalies", []),
+                "snapshot_date": v.get("snapshot_date"),
+            },
+        })
+    else:
+        # Graph completed normally (no updates found, error, etc.)
+        v = state.values if state else {}
         error = v.get("error")
         msgs = v.get("messages", [])
         if error:
             await websocket.send_json({"type": "error", "content": error})
-        elif msgs:
+        else:
             last_assistant = next(
                 (m["content"] for m in reversed(msgs) if m["role"] == "assistant"), None
             )
             if last_assistant:
                 await websocket.send_json({"type": "response", "content": last_assistant})
+            else:
+                await websocket.send_json({
+                    "type": "response",
+                    "content": "I couldn't find any asset updates in your message. Please try again.",
+                })
 
 
 async def handle_confirmation(
@@ -160,33 +160,32 @@ async def handle_confirmation(
     edits: dict[str, float] | None = None,
 ) -> None:
     """Resume the paused Update Agent with the user's confirmation decision."""
-    graph = _active_graphs.get(conversation_id)
     config = _active_configs.get(conversation_id)
 
-    if not graph or not config:
+    if not config:
         await websocket.send_json({
             "type": "error",
             "content": "No active update session. Please start a new message.",
         })
         return
 
-    # Apply any edits to the interrupt value
-    resume_value = {"confirmed": confirmed, "edits": edits or {}}
-
     await websocket.send_json({"type": "thinking", "content": "Saving updates…"})
 
     async with AsyncSessionLocal() as session:
-        # Re-build graph with fresh session for the write phase
+        # Rebuild graph with fresh session — _CHECKPOINTER is module-level so
+        # checkpoint state from the first run is preserved.
         graph = build_update_graph(session)
-        _active_graphs[conversation_id] = graph
 
-        # Resume from interrupt
-        async for event in graph.astream(
-            {"user_confirmed": confirmed},
+        # Inject user's decision into the checkpoint state
+        await graph.aupdate_state(
             config,
-            stream_mode="values",
-        ):
-            pass  # consume events
+            {"user_confirmed": confirmed},
+            as_node="write_updates",
+        )
+
+        # Resume execution from the interrupted point
+        async for event in graph.astream(None, config, stream_mode="values"):
+            pass
 
         final_state = await graph.aget_state(config)
         if final_state and final_state.values:
@@ -199,23 +198,43 @@ async def handle_confirmation(
                 msg_type = "update_complete" if confirmed else "response"
                 await websocket.send_json({"type": msg_type, "content": last_assistant})
 
-    # Cleanup
-    _active_graphs.pop(conversation_id, None)
+    # Cleanup conversation state
     _active_configs.pop(conversation_id, None)
 
 
-async def _general_response(websocket: WebSocket, message: str, intent: str) -> None:
-    """Handle non-update intents with a simple LLM response."""
+async def _general_response(
+    websocket: WebSocket, message: str, intent: str, session: AsyncSession
+) -> None:
+    """Handle non-update intents with a portfolio-aware LLM response."""
+    from app.tools.portfolio import make_portfolio_tools
+
     llm = ChatAnthropic(
         model="claude-sonnet-4-6",
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
         max_tokens=512,
     )
 
+    # Fetch live portfolio data so the LLM can answer factual questions
+    try:
+        tools = make_portfolio_tools(session)
+        summary = await tools["get_net_worth_summary"]()
+        portfolio_lines = [
+            f"- {h['asset_name']}: €{h['current_amount']:,.0f}"
+            for h in summary["holdings"]
+        ]
+        portfolio_context = (
+            f"Current portfolio (total €{summary['total_net_worth']:,.0f}):\n"
+            + "\n".join(portfolio_lines)
+        )
+    except Exception:
+        portfolio_context = "Portfolio data unavailable."
+
     system = (
         "You are Fineas, a friendly FIRE portfolio copilot. "
         "You help users track investments and plan for financial independence. "
+        f"{portfolio_context}\n\n"
         f"The user's intent was classified as '{intent}'. "
+        "Use the portfolio data above to answer questions accurately. "
         "If it's a projection or goal question, briefly explain that full projection tools are coming in Phase 2. "
         "Keep responses concise and helpful."
     )

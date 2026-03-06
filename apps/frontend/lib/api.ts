@@ -1,10 +1,17 @@
 import type {
+  Asset,
   CompoundResult,
   NetWorthHistory,
   PortfolioSummary,
+  Snapshot,
 } from "@/types/schema";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Server components run inside the container; client components use relative
+// URLs that Next.js rewrites proxy to the backend (see next.config.ts).
+const API_BASE =
+  typeof window === "undefined"
+    ? (process.env.INTERNAL_API_URL ?? "http://localhost:8000")
+    : "";
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -35,4 +42,49 @@ export async function runProjection(params: {
     method: "POST",
     body: JSON.stringify(params),
   });
+}
+
+export async function getAssets(opts?: { includeInactive?: boolean }): Promise<Asset[]> {
+  const qs = opts?.includeInactive ? "?include_inactive=true" : "";
+  return apiFetch<Asset[]>(`/api/assets/${qs}`);
+}
+
+export async function updateAsset(
+  id: string,
+  payload: { is_active?: boolean },
+): Promise<Asset> {
+  return apiFetch<Asset>(`/api/assets/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getSnapshotsForAsset(assetId: string): Promise<Snapshot[]> {
+  return apiFetch<Snapshot[]>(`/api/snapshots/?asset_id=${assetId}`);
+}
+
+export async function addSnapshot(payload: {
+  asset_id: string;
+  date: string;
+  amount: number;
+  source?: string;
+}): Promise<Snapshot> {
+  return apiFetch<Snapshot>("/api/snapshots/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateSnapshot(
+  id: string,
+  payload: { asset_id: string; date: string; amount: number; source?: string },
+): Promise<Snapshot> {
+  return apiFetch<Snapshot>(`/api/snapshots/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteSnapshot(id: string): Promise<void> {
+  await apiFetch<void>(`/api/snapshots/${id}`, { method: "DELETE" });
 }

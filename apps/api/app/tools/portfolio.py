@@ -1,17 +1,15 @@
 """
 Portfolio tools for the NL Update Agent.
 
-Tools are plain functions (not async) — they receive the AsyncSession via
-closure when the agent is instantiated. DB operations are run via asyncio.
+Plain async functions bound to a specific AsyncSession via closure.
+Nodes call these directly with `await tools["function_name"](...)`.
 """
 from __future__ import annotations
 
-import asyncio
 from datetime import date
 from typing import Any
 
 import Levenshtein
-from langchain_core.tools import tool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,26 +95,17 @@ class WriteResult:
 
 
 # ---------------------------------------------------------------------------
-# Tool factory — injects session into closures
+# Tool factory — injects session into async closures
 # ---------------------------------------------------------------------------
 
-def make_portfolio_tools(session: AsyncSession):
-    """Create tool functions bound to a specific DB session."""
+def make_portfolio_tools(session: AsyncSession) -> dict:
+    """Returns dict of plain async functions bound to this session.
 
-    def _run_sync(coro):
-        """Run a coroutine synchronously from within a sync tool."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # We're inside an async context (LangGraph) — use nest_asyncio or run_until_complete
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, coro)
-                    return future.result()
-            else:
-                return loop.run_until_complete(coro)
-        except RuntimeError:
-            return asyncio.run(coro)
+    Usage in nodes:
+        tools = make_portfolio_tools(session)
+        holdings = await tools["get_current_holdings"]()
+        match = await tools["get_asset_by_name"]("stocks")
+    """
 
     async def _get_latest_snapshots() -> dict[str, HoldingInfo]:
         stmt = (
@@ -148,23 +137,16 @@ def make_portfolio_tools(session: AsyncSession):
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
-    @tool
-    def get_current_holdings() -> dict[str, dict]:
+    async def get_current_holdings() -> dict[str, dict]:
         """Get the latest snapshot for each active asset.
         Returns a dict mapping asset_name → {asset_id, asset_type, platform, current_amount, snapshot_date}.
         """
-        holdings = _run_sync(_get_latest_snapshots())
+        holdings = await _get_latest_snapshots()
         return {name: h.to_dict() for name, h in holdings.items()}
 
-    @tool
-    def get_asset_by_name(query: str) -> dict:
-        """Find an asset by fuzzy-matching the user's text to known asset names.
-        Returns {asset_id, asset_name, confidence} or raises if ambiguous.
-
-        Args:
-            query: User-provided asset name (e.g. "stocks", "xtrackers", "p2p")
-        """
-        names = _run_sync(_get_all_active_asset_names())
+    async def get_asset_by_name(query: str) -> dict:
+        """Find an asset by fuzzy-matching the user's text to known asset names."""
+        names = await _get_all_active_asset_names()
         q = query.lower().strip()
 
         # Exact match first
@@ -197,20 +179,17 @@ def make_portfolio_tools(session: AsyncSession):
             "confidence": 0.0,
         }
 
-    @tool
-    def get_net_worth_summary() -> dict:
-        """Get total net worth and per-asset breakdown.
-        Returns {total, holdings: list[...], change_from_previous: float}
-        """
-        holdings = _run_sync(_get_latest_snapshots())
+    async def get_net_worth_summary() -> dict:
+        """Get total net worth and per-asset breakdown."""
+        holdings = await _get_latest_snapshots()
         total = sum(h.current_amount for h in holdings.values())
         return {
             "total_net_worth": round(total, 2),
             "holdings": [h.to_dict() for h in sorted(holdings.values(), key=lambda h: h.current_amount, reverse=True)],
         }
 
-    async def _write_snapshots(updates: list[dict]) -> list[WriteResult]:
-        """Write snapshots to the database."""
+    async def batch_update_snapshots(updates: list[dict]) -> list[dict]:
+        """Write confirmed snapshot updates to the database."""
         results = []
         for upd in updates:
             asset_id = upd["asset_id"]
@@ -218,7 +197,6 @@ def make_portfolio_tools(session: AsyncSession):
             amount = upd["amount"]
 
             try:
-                # Upsert snapshot
                 stmt = (
                     select(Snapshot)
                     .where(Snapshot.asset_id == asset_id)
@@ -240,42 +218,28 @@ def make_portfolio_tools(session: AsyncSession):
 
                 await session.commit()
                 asset = await session.get(Asset, asset_id)
-                results.append(WriteResult(
-                    asset_name=asset.name if asset else asset_id,
-                    date=snap_date,
-                    amount=amount,
-                    success=True,
-                ))
+                results.append({
+                    "asset_name": asset.name if asset else asset_id,
+                    "date": snap_date.isoformat(),
+                    "amount": amount,
+                    "success": True,
+                    "error": None,
+                })
             except Exception as e:
                 await session.rollback()
-                results.append(WriteResult(
-                    asset_name=upd.get("asset_name", asset_id),
-                    date=snap_date,
-                    amount=amount,
-                    success=False,
-                    error=str(e),
-                ))
+                results.append({
+                    "asset_name": upd.get("asset_name", asset_id),
+                    "date": snap_date.isoformat(),
+                    "amount": amount,
+                    "success": False,
+                    "error": str(e),
+                })
 
         return results
 
-    @tool
-    def batch_update_snapshots(updates: list[dict]) -> list[dict]:
-        """Write confirmed snapshot updates to the database.
-        Only call this AFTER user confirmation.
-
-        Args:
-            updates: List of {asset_id: str, date: str (ISO), amount: float}
-        """
-        results = _run_sync(_write_snapshots(updates))
-        return [
-            {
-                "asset_name": r.asset_name,
-                "date": r.date.isoformat(),
-                "amount": r.amount,
-                "success": r.success,
-                "error": r.error,
-            }
-            for r in results
-        ]
-
-    return [get_current_holdings, get_asset_by_name, get_net_worth_summary, batch_update_snapshots]
+    return {
+        "get_current_holdings": get_current_holdings,
+        "get_asset_by_name": get_asset_by_name,
+        "get_net_worth_summary": get_net_worth_summary,
+        "batch_update_snapshots": batch_update_snapshots,
+    }

@@ -2,7 +2,7 @@
 NL Update Agent — Phase 1.
 
 Flow: parse_input → fetch_current → compute_deltas → present_confirmation
-      → [interrupt] → write_updates → respond
+      → [INTERRUPT before write_updates] → write_updates → respond → END
 
 Human-in-the-loop is enforced at the graph level: interrupt_before=["write_updates"].
 No DB writes can happen without user confirmation, regardless of LLM behavior.
@@ -14,19 +14,21 @@ import logging
 from datetime import date
 from typing import Any, Literal
 
-from anthropic import AsyncAnthropic
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
-from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
 from app.config import settings
-from app.tools.portfolio import AssetDelta, HoldingInfo, make_portfolio_tools
+from app.tools.portfolio import AssetDelta, make_portfolio_tools
 
 log = logging.getLogger(__name__)
+
+# Module-level shared checkpointer — survives across graph rebuilds so that
+# checkpoint state persists from initial run through the confirmation resume.
+_CHECKPOINTER = MemorySaver()
 
 
 # ---------------------------------------------------------------------------
@@ -35,8 +37,8 @@ log = logging.getLogger(__name__)
 
 class ParsedUpdate(TypedDict):
     asset_name: str
-    new_amount: float
-    matched_asset_id: str | None
+    new_amount: float | None          # absolute value (preferred)
+    delta: float | None               # relative change (e.g. "add 1000")
 
 
 class UpdateAgentState(TypedDict):
@@ -70,10 +72,15 @@ The user tracks these assets:
 
 When the user says "everything else same", do NOT include those assets — they will be carried forward unchanged.
 
-Return a JSON array of updates in this exact format:
+Return a JSON array. Always include both "new_amount" and "delta" keys; set the unused one to null.
+- Use "new_amount" for absolute values: "set lyxor smart to 5000" → new_amount=5000.00, delta=null
+- Use "delta" for relative changes: "add 1000 to lyxor smart" or "increase by 500" → new_amount=null, delta=1000.00
+- For reductions: "remove 200 from stocks" → new_amount=null, delta=-200.00
+
+Example:
 [
-  {"asset_name": "Long-Term Stocks", "new_amount": 13500.00},
-  {"asset_name": "Xtrackers EUR Overnight", "new_amount": 4800.00}
+  {"asset_name": "Long-Term Stocks", "new_amount": 13500.00, "delta": null},
+  {"asset_name": "Lyxor SMART", "new_amount": null, "delta": 1000.00}
 ]
 
 Return ONLY the JSON array, no other text. If you cannot extract any updates, return [].
@@ -123,10 +130,7 @@ async def parse_input(state: UpdateAgentState) -> dict:
 async def fetch_current(state: UpdateAgentState, session: AsyncSession) -> dict:
     """Get latest snapshot per active asset."""
     tools = make_portfolio_tools(session)
-    get_holdings = tools[0]  # get_current_holdings
-
-    # Call tool directly (it's synchronous inside)
-    holdings = get_holdings.invoke({})
+    holdings = await tools["get_current_holdings"]()
     log.info("fetch_current: %d holdings", len(holdings))
     return {"current_holdings": holdings}
 
@@ -134,14 +138,12 @@ async def fetch_current(state: UpdateAgentState, session: AsyncSession) -> dict:
 async def compute_deltas(state: UpdateAgentState, session: AsyncSession) -> dict:
     """Match parsed updates to current holdings and compute deltas."""
     tools = make_portfolio_tools(session)
-    get_asset = tools[1]  # get_asset_by_name
 
     deltas = []
     anomalies = []
 
     for upd in state["parsed_updates"]:
-        # Fuzzy-match the asset name
-        match_result = get_asset.invoke({"query": upd["asset_name"]})
+        match_result = await tools["get_asset_by_name"](upd["asset_name"])
 
         if match_result.get("error") or not match_result.get("asset_name"):
             anomalies.append(f"Could not match '{upd['asset_name']}': {match_result.get('error', 'unknown')}")
@@ -154,11 +156,20 @@ async def compute_deltas(state: UpdateAgentState, session: AsyncSession) -> dict
             anomalies.append(f"No current snapshot found for '{matched_name}'")
             continue
 
+        new_amount = upd.get("new_amount")
+        relative_delta = upd.get("delta")
+
+        if new_amount is None and relative_delta is not None:
+            new_amount = holding["current_amount"] + relative_delta
+        elif new_amount is None:
+            anomalies.append(f"Could not determine new value for '{upd['asset_name']}'")
+            continue
+
         delta = AssetDelta(
             asset_name=matched_name,
             asset_id=holding["asset_id"],
             old_amount=holding["current_amount"],
-            new_amount=upd["new_amount"],
+            new_amount=new_amount,
         )
         deltas.append(delta.to_dict())
 
@@ -188,7 +199,7 @@ async def compute_deltas(state: UpdateAgentState, session: AsyncSession) -> dict
 
 
 async def present_confirmation(state: UpdateAgentState) -> dict:
-    """Format the confirmation summary for the user. Returns state; actual interruption in next node."""
+    """Format the confirmation summary for the user."""
     if not state["deltas"]:
         return {
             "error": "No valid updates found. Please rephrase and try again.",
@@ -213,18 +224,6 @@ async def present_confirmation(state: UpdateAgentState) -> dict:
     return {"messages": state["messages"] + [{"role": "assistant", "content": "\n".join(lines)}]}
 
 
-async def await_confirmation(state: UpdateAgentState) -> dict:
-    """Human-in-the-loop interrupt. Graph pauses here until user responds."""
-    confirmation_data = {
-        "updates": state["deltas"],
-        "anomalies": state["anomalies"],
-        "snapshot_date": state["snapshot_date"],
-    }
-    # This raises a special exception that LangGraph catches to pause execution
-    user_response = interrupt(confirmation_data)
-    return {"user_confirmed": user_response.get("confirmed", False)}
-
-
 async def write_updates(state: UpdateAgentState, session: AsyncSession) -> dict:
     """Write confirmed snapshots to the database."""
     if not state.get("user_confirmed"):
@@ -233,7 +232,6 @@ async def write_updates(state: UpdateAgentState, session: AsyncSession) -> dict:
         ]}
 
     tools = make_portfolio_tools(session)
-    batch_write = tools[3]  # batch_update_snapshots
 
     updates_payload = [
         {
@@ -245,7 +243,7 @@ async def write_updates(state: UpdateAgentState, session: AsyncSession) -> dict:
         for d in state["deltas"]
     ]
 
-    results = batch_write.invoke({"updates": updates_payload})
+    results = await tools["batch_update_snapshots"](updates_payload)
     log.info("write_updates: %d results", len(results))
     return {"write_results": results}
 
@@ -256,8 +254,7 @@ async def respond(state: UpdateAgentState, session: AsyncSession) -> dict:
         return {}  # already handled in write_updates
 
     tools = make_portfolio_tools(session)
-    summary_tool = tools[2]  # get_net_worth_summary
-    summary = summary_tool.invoke({})
+    summary = await tools["get_net_worth_summary"]()
 
     successes = [r for r in state.get("write_results", []) if r.get("success")]
     failures = [r for r in state.get("write_results", []) if not r.get("success")]
@@ -282,10 +279,10 @@ def route_after_parse(state: UpdateAgentState) -> Literal["fetch_current", END]:
     return "fetch_current"
 
 
-def route_after_confirmation_check(state: UpdateAgentState) -> Literal["await_confirmation", END]:
+def route_after_confirmation(state: UpdateAgentState) -> Literal["write_updates", END]:
     if not state["deltas"] or state.get("error"):
         return END
-    return "await_confirmation"
+    return "write_updates"
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +290,11 @@ def route_after_confirmation_check(state: UpdateAgentState) -> Literal["await_co
 # ---------------------------------------------------------------------------
 
 def build_update_graph(session: AsyncSession) -> Any:
-    """Build and compile the update agent graph with session injection."""
+    """Build and compile the update agent graph with session injection.
+
+    Uses the module-level _CHECKPOINTER so state persists across graph
+    rebuilds (e.g. when a fresh session is needed for the write phase).
+    """
 
     # Partial-apply session into nodes that need DB access
     async def _fetch_current(state):
@@ -314,7 +315,6 @@ def build_update_graph(session: AsyncSession) -> Any:
     builder.add_node("fetch_current", _fetch_current)
     builder.add_node("compute_deltas", _compute_deltas)
     builder.add_node("present_confirmation", present_confirmation)
-    builder.add_node("await_confirmation", await_confirmation)
     builder.add_node("write_updates", _write_updates)
     builder.add_node("respond", _respond)
 
@@ -322,14 +322,12 @@ def build_update_graph(session: AsyncSession) -> Any:
     builder.add_conditional_edges("parse_input", route_after_parse)
     builder.add_edge("fetch_current", "compute_deltas")
     builder.add_edge("compute_deltas", "present_confirmation")
-    builder.add_conditional_edges("present_confirmation", route_after_confirmation_check)
-    builder.add_edge("await_confirmation", "write_updates")
+    builder.add_conditional_edges("present_confirmation", route_after_confirmation)
     builder.add_edge("write_updates", "respond")
     builder.add_edge("respond", END)
 
-    checkpointer = MemorySaver()
     graph = builder.compile(
-        checkpointer=checkpointer,
-        interrupt_before=["write_updates"],  # Safety: always pause before DB writes
+        checkpointer=_CHECKPOINTER,      # shared singleton — survives rebuilds
+        interrupt_before=["write_updates"],
     )
     return graph

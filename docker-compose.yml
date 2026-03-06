@@ -43,6 +43,7 @@ services:
       - "3001:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      INTERNAL_API_URL: http://api:8000
     volumes:
       - ./apps/frontend:/app
       - /app/node_modules

@@ -1,8 +1,16 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ProjectionCurve } from "@/components/dashboard/ProjectionCurve";
+import { DataManager } from "@/components/data/DataManager";
+import { getAssets } from "@/lib/api";
 import Link from "next/link";
 
-export default function ProjectionsPage() {
+export default async function DataPage() {
+  let assets = [];
+  try {
+    assets = await getAssets({ includeInactive: true });
+  } catch {
+    // API not available
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b bg-white px-6 py-4 flex items-center justify-between">
@@ -17,30 +25,33 @@ export default function ProjectionsPage() {
           <Link href="/chat" className="text-muted-foreground hover:text-foreground">
             Chat
           </Link>
-          <span className="font-medium">Projections</span>
-          <Link href="/data" className="text-muted-foreground hover:text-foreground">
-            Data
+          <Link href="/projections" className="text-muted-foreground hover:text-foreground">
+            Projections
           </Link>
+          <span className="font-medium">Data</span>
         </nav>
       </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-8 space-y-6">
+      <main className="mx-auto max-w-5xl px-6 py-8 space-y-6">
         <div>
-          <h2 className="text-2xl font-bold">FIRE Projections</h2>
+          <h2 className="text-2xl font-bold">Manage Data</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Deterministic compound growth — Phase 2 adds Monte Carlo simulation
+            View, add, edit, and delete snapshots per asset.
           </p>
         </div>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-medium">20-Year Projection · €750/mo</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Allocation-weighted real returns · 2% inflation adjusted
-            </p>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium">Snapshots</CardTitle>
           </CardHeader>
           <CardContent>
-            <ProjectionCurve monthlyContribution={750} targetAmount={500000} />
+            {assets.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                API not reachable — start the backend first.
+              </p>
+            ) : (
+              <DataManager assets={assets} />
+            )}
           </CardContent>
         </Card>
       </main>
