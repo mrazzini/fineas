@@ -1,0 +1,17 @@
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+
+# Database — SQLAlchemy 2.0 async + PostgreSQL driver
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+
+# Data validation (FastAPI schemas)
+pydantic==2.10.3
+
+# AI / Agent (used in Phase 3 & 4)
+anthropic==0.40.0
+langgraph==0.2.60
+
+# Environment config
+python-dotenv==1.0.1
