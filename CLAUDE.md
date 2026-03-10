@@ -12,7 +12,7 @@ Fineas is an educational project exploring the implementation of **Agentic Workf
 ## Core Tech Stack
 - **Backend:** FastAPI (Async), SQLAlchemy 2.0, PostgreSQL.
 - **Orchestration:** LangGraph (State management for the AI agent).
-- **Intelligence:** Claude 3.5 Sonnet (Parsing & Reasoning).
+- **Intelligence:** Claude 4.6 Sonnet (Parsing & Reasoning).
 - **Frontend:** Next.js 14 (App Router), Tailwind CSS, Recharts.
 
 ## Development Status (Iterative Phases)
