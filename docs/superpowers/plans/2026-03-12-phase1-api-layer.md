@@ -165,7 +165,7 @@ cd /workspaces/fineas/apps/backend && python -c "from schemas import AssetCreate
 ```
 Expected: `OK`
 
-- [ ] **Step 2.3: Commit**
+- [x] **Step 2.3: Commit**
 ```bash
 git add apps/backend/schemas.py
 git commit -m "feat: add Pydantic v2 request/response schemas"
@@ -179,14 +179,14 @@ git commit -m "feat: add Pydantic v2 request/response schemas"
 - Create: `apps/backend/tests/__init__.py`
 - Create: `apps/backend/tests/conftest.py`
 
-- [ ] **Step 3.1: Create package marker**
+- [x] **Step 3.1: Create package marker**
 
 ```python
 # apps/backend/tests/__init__.py
 ```
 (empty file)
 
-- [ ] **Step 3.2: Create conftest.py**
+- [x] **Step 3.2: Create conftest.py**
 
 ```python
 # apps/backend/tests/conftest.py
@@ -254,7 +254,7 @@ async def client(db_session: AsyncSession):
     app.dependency_overrides.clear()
 ```
 
-- [ ] **Step 3.3: Commit**
+- [x] **Step 3.3: Commit**
 ```bash
 git add apps/backend/tests/__init__.py apps/backend/tests/conftest.py
 git commit -m "test: add async conftest with transaction-rollback isolation"
