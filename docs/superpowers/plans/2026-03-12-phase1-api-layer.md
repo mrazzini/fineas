@@ -44,7 +44,7 @@
 - Create: `apps/backend/requirements-dev.txt`
 - Create: `apps/backend/pytest.ini`
 
-- [ ] **Step 1.1: Create dev requirements**
+- [x] **Step 1.1: Create dev requirements**
 
 ```
 # apps/backend/requirements-dev.txt
@@ -53,7 +53,7 @@ pytest-asyncio==0.24.0
 httpx==0.28.1
 ```
 
-- [ ] **Step 1.2: Install dev requirements**
+- [x] **Step 1.2: Install dev requirements**
 
 ```bash
 cd /workspaces/fineas/apps/backend
@@ -61,7 +61,7 @@ pip install -r requirements.txt -r requirements-dev.txt -q
 ```
 Expected: no errors.
 
-- [ ] **Step 1.3: Create pytest.ini**
+- [x] **Step 1.3: Create pytest.ini**
 
 ```ini
 # apps/backend/pytest.ini
@@ -72,14 +72,14 @@ testpaths = tests
 ```
 `asyncio_mode = auto` means every `async def test_*` function is automatically treated as an async test — no `@pytest.mark.asyncio` decorator needed on each test. `asyncio_default_fixture_loop_scope = session` is required by pytest-asyncio 0.24+ to tell it all async fixtures share one event loop — without it, the session-scoped `test_engine` fixture and function-scoped fixtures run in different loops, causing `RuntimeError: Task attached to different loop`.
 
-- [ ] **Step 1.4: Verify pytest discovers tests (zero tests is fine)**
+- [x] **Step 1.4: Verify pytest discovers tests (zero tests is fine)**
 
 ```bash
 cd /workspaces/fineas/apps/backend && pytest --collect-only -q
 ```
 Expected: `no tests ran` or `0 items`.
 
-- [ ] **Step 1.5: Commit**
+- [x] **Step 1.5: Commit**
 ```bash
 git add apps/backend/requirements-dev.txt apps/backend/pytest.ini
 git commit -m "test: add dev requirements and pytest config"
