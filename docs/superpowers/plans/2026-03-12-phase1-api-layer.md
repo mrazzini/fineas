@@ -92,7 +92,7 @@ git commit -m "test: add dev requirements and pytest config"
 **Files:**
 - Create: `apps/backend/schemas.py`
 
-- [ ] **Step 2.1: Write the schemas**
+- [x] **Step 2.1: Write the schemas**
 
 ```python
 # apps/backend/schemas.py
@@ -158,7 +158,7 @@ class SnapshotRead(BaseModel):
     created_at: datetime
 ```
 
-- [ ] **Step 2.2: Verify schemas import cleanly**
+- [x] **Step 2.2: Verify schemas import cleanly**
 
 ```bash
 cd /workspaces/fineas/apps/backend && python -c "from schemas import AssetCreate, AssetRead, SnapshotCreate, SnapshotRead; print('OK')"
