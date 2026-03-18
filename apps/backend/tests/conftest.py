@@ -3,19 +3,22 @@ Async test fixtures for Fineas.
 
 Isolation strategy:
   - `test_engine` (session-scoped): creates all tables once for the test session,
-    drops them on teardown.
-  - `db_session` (function-scoped): each test runs inside a transaction that is
-    rolled back after the test completes — zero DB state leaks between tests.
+    drops them on teardown.  Uses NullPool to avoid asyncpg cross-task issues.
   - `client` (function-scoped): httpx.AsyncClient wired to the FastAPI app with
-    `get_db` overridden to inject the test session.
+    `get_db` overridden to inject a test session factory.  Each request gets its
+    own session (avoiding asyncpg's Task-identity check).  All data is deleted
+    between tests for isolation.
 
-Why transaction rollback instead of table truncation?
-  Rollback is ~10x faster than TRUNCATE and guarantees the DB returns to the
-  exact same state, including sequence counters and constraints.
+Why not transaction rollback?
+  httpx.ASGITransport spawns a new asyncio Task for the ASGI app.  asyncpg
+  binds connections to the Task that created them, so sharing a single
+  connection across fixtures and ASGI handlers triggers RuntimeError.
+  Per-request sessions with table cleanup avoids this entirely.
 """
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from database import get_db
 from main import app
@@ -27,7 +30,7 @@ TEST_DATABASE_URL = "postgresql+asyncpg://fineas:fineas@localhost:5432/fineas_te
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def test_engine():
     """Create the test schema once per pytest session."""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
@@ -36,27 +39,23 @@ async def test_engine():
     await engine.dispose()
 
 
-@pytest_asyncio.fixture
-async def db_session(test_engine):
-    """
-    Each test gets a fresh transaction that is rolled back on completion.
-    Uses SQLAlchemy's 'join external transaction' pattern.
-    """
-    async with test_engine.connect() as conn:
-        await conn.begin()
-        session = AsyncSession(bind=conn, join_transaction_mode="create_savepoint", expire_on_commit=False)
-        yield session
-        await session.close()
-        await conn.rollback()
-
-
-@pytest_asyncio.fixture
-async def client(db_session: AsyncSession):
+@pytest_asyncio.fixture(loop_scope="session")
+async def client(test_engine):
     """httpx.AsyncClient with the FastAPI app and test DB injected."""
+    TestingSession = async_sessionmaker(
+        bind=test_engine, class_=AsyncSession, expire_on_commit=False,
+    )
+
     async def override_get_db():
-        yield db_session
+        async with TestingSession() as session:
+            yield session
 
     app.dependency_overrides[get_db] = override_get_db
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+    # Clean up: delete all data after each test for isolation
+    async with test_engine.begin() as conn:
+        for table in reversed(Base.metadata.sorted_tables):
+            await conn.execute(table.delete())

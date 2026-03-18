@@ -269,7 +269,7 @@ git commit -m "test: add async conftest with transaction-rollback isolation"
 **Files:**
 - Create: `apps/backend/main.py`
 
-- [ ] **Step 4.1: Write main.py**
+- [x] **Step 4.1: Write main.py**
 
 ```python
 # apps/backend/main.py
@@ -309,7 +309,7 @@ async def health():
     return {"status": "ok"}
 ```
 
-- [ ] **Step 4.2: Create routers package and shared deps**
+- [x] **Step 4.2: Create routers package and shared deps**
 
 ```python
 # apps/backend/routers/__init__.py
@@ -336,7 +336,7 @@ async def get_asset_or_404(asset_id: uuid.UUID, db: AsyncSession) -> Asset:
     return asset
 ```
 
-- [ ] **Step 4.3: Verify app imports cleanly**
+- [x] **Step 4.3: Verify app imports cleanly**
 ```bash
 cd /workspaces/fineas/apps/backend && python -c "from main import app; print('App OK:', app.title)"
 ```
@@ -351,7 +351,7 @@ Expected: `App OK: Fineas API`
 
 *Write all tests first — they will all fail until the router is implemented in Task 6.*
 
-- [ ] **Step 5.1: Write test_assets.py**
+- [x] **Step 5.1: Write test_assets.py**
 
 ```python
 # apps/backend/tests/test_assets.py
@@ -439,7 +439,7 @@ async def test_delete_asset(client: AsyncClient):
     assert get.status_code == 404
 ```
 
-- [ ] **Step 5.2: Run tests — expect ALL to fail**
+- [x] **Step 5.2: Run tests — expect ALL to fail**
 
 ```bash
 cd /workspaces/fineas/apps/backend && pytest tests/test_assets.py -v
@@ -453,7 +453,7 @@ Expected: all fail with `ImportError` or `404` — routers don't exist yet.
 **Files:**
 - Create: `apps/backend/routers/assets.py`
 
-- [ ] **Step 6.1: Write the assets router**
+- [x] **Step 6.1: Write the assets router**
 
 ```python
 # apps/backend/routers/assets.py
@@ -528,14 +528,14 @@ async def delete_asset(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     await db.commit()
 ```
 
-- [ ] **Step 6.2: Run tests — expect ALL to pass**
+- [x] **Step 6.2: Run tests — expect ALL to pass**
 
 ```bash
 cd /workspaces/fineas/apps/backend && pytest tests/test_assets.py -v
 ```
 Expected: `8 passed`.
 
-- [ ] **Step 6.3: Commit**
+- [x] **Step 6.3: Commit**
 ```bash
 git add apps/backend/main.py apps/backend/routers/__init__.py apps/backend/routers/assets.py apps/backend/tests/test_assets.py
 git commit -m "feat: assets CRUD router with integration tests"
@@ -550,7 +550,7 @@ git commit -m "feat: assets CRUD router with integration tests"
 **Files:**
 - Create: `apps/backend/tests/test_snapshots.py`
 
-- [ ] **Step 7.1: Write test_snapshots.py**
+- [x] **Step 7.1: Write test_snapshots.py**
 
 ```python
 # apps/backend/tests/test_snapshots.py
@@ -614,7 +614,7 @@ async def test_list_snapshots_asset_not_found(client: AsyncClient):
     assert response.status_code == 404
 ```
 
-- [ ] **Step 7.2: Run tests — expect ALL to fail**
+- [x] **Step 7.2: Run tests — expect ALL to fail**
 
 ```bash
 cd /workspaces/fineas/apps/backend && pytest tests/test_snapshots.py -v
@@ -628,7 +628,7 @@ Expected: all fail.
 **Files:**
 - Create: `apps/backend/routers/snapshots.py`
 
-- [ ] **Step 8.1: Write the snapshots router**
+- [x] **Step 8.1: Write the snapshots router**
 
 ```python
 # apps/backend/routers/snapshots.py
@@ -689,14 +689,14 @@ async def list_snapshots(
     return result.scalars().all()
 ```
 
-- [ ] **Step 8.2: Run all tests — expect ALL to pass**
+- [x] **Step 8.2: Run all tests — expect ALL to pass**
 
 ```bash
 cd /workspaces/fineas/apps/backend && pytest -v
 ```
 Expected: `13 passed`.
 
-- [ ] **Step 8.3: Commit**
+- [x] **Step 8.3: Commit**
 ```bash
 git add apps/backend/routers/snapshots.py apps/backend/tests/test_snapshots.py
 git commit -m "feat: snapshots CRUD router with integration tests"
@@ -711,18 +711,18 @@ git commit -m "feat: snapshots CRUD router with integration tests"
 - Create: `apps/backend/alembic/env.py`
 - Create (dir): `apps/backend/alembic/versions/`
 
-- [ ] **Step 9.1: Install alembic**
+- [x] **Step 9.1: Install alembic**
 ```bash
 pip install alembic -q
 ```
 
-- [ ] **Step 9.2: Initialise Alembic in async mode**
+- [x] **Step 9.2: Initialise Alembic in async mode**
 ```bash
 cd /workspaces/fineas/apps/backend && alembic init -t async alembic
 ```
 Expected: creates `alembic.ini` and `alembic/` directory.
 
-- [ ] **Step 9.3: Update alembic/env.py for async + our models**
+- [x] **Step 9.3: Update alembic/env.py for async + our models**
 
 Replace the generated `alembic/env.py` with:
 
@@ -780,20 +780,20 @@ else:
     asyncio.run(run_migrations_online())
 ```
 
-- [ ] **Step 9.4: Autogenerate the first migration**
+- [x] **Step 9.4: Create the first migration (hand-crafted)**
 ```bash
 cd /workspaces/fineas/apps/backend && alembic revision --autogenerate -m "create assets and asset_snapshots"
 ```
 Expected: a new file in `alembic/versions/` with `op.create_table("assets", ...)` and `op.create_table("asset_snapshots", ...)`.
 
-- [ ] **Step 9.5: Inspect the generated migration**
+- [x] **Step 9.5: Inspect the generated migration**
 
 Open the generated file in `alembic/versions/`. Verify it contains:
 - `op.create_table("assets", ...)` with all columns
 - `op.create_table("asset_snapshots", ...)` with FK + UNIQUE constraint
 - `op.create_index(...)` for `uq_snapshot_asset_date`
 
-- [ ] **Step 9.6: Commit**
+- [x] **Step 9.6: Commit**
 ```bash
 git add apps/backend/alembic.ini apps/backend/alembic/
 git commit -m "feat: Alembic async config + initial migration for assets and snapshots"
@@ -806,7 +806,7 @@ git commit -m "feat: Alembic async config + initial migration for assets and sna
 **Files:**
 - Create: `docker-compose.yml`
 
-- [ ] **Step 10.1: Write docker-compose.yml**
+- [x] **Step 10.1: Write docker-compose.yml**
 
 ```yaml
 # docker-compose.yml
@@ -845,7 +845,7 @@ volumes:
   pgdata:
 ```
 
-- [ ] **Step 10.2: Write the test DB init script**
+- [x] **Step 10.2: Write the test DB init script**
 ```bash
 mkdir -p /workspaces/fineas/scripts
 ```
@@ -856,7 +856,7 @@ mkdir -p /workspaces/fineas/scripts
 CREATE DATABASE fineas_test;
 ```
 
-- [ ] **Step 10.3: Write Dockerfile for the API**
+- [x] **Step 10.3: Write Dockerfile for the API**
 
 ```dockerfile
 # apps/backend/Dockerfile
@@ -868,7 +868,7 @@ COPY . .
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-- [ ] **Step 10.4: Commit**
+- [x] **Step 10.4: Commit**
 ```bash
 git add docker-compose.yml scripts/init-test-db.sql apps/backend/Dockerfile
 git commit -m "feat: Docker Compose with Postgres service and test DB init"
