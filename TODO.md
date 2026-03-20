@@ -15,8 +15,8 @@
 - [x] FIRE target calculator (time-to-retirement given savings rate + return)
 
 ## Phase 3: Smart Ingestion
-- [ ] LLM-powered parser: free-text / CSV → structured JSON
-- [ ] Upsert endpoint using `ON CONFLICT (asset_id, snapshot_date) DO UPDATE`
+- [x] LLM-powered parser: free-text / CSV → structured JSON
+- [x] Upsert endpoint using `ON CONFLICT (asset_id, snapshot_date) DO UPDATE`
 
 ## Phase 4: The Agent
 - [ ] LangGraph state machine for portfolio update workflow

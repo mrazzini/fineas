@@ -2,13 +2,15 @@
 CRUD endpoints for AssetSnapshot, nested under /assets/{asset_id}.
 
 Route summary:
-  POST  /assets/{id}/snapshots  -> 201 SnapshotRead | 404 | 409
-  GET   /assets/{id}/snapshots  -> 200 list[SnapshotRead] | 404
+  POST  /assets/{id}/snapshots         -> 201 SnapshotRead | 404 | 409
+  GET   /assets/{id}/snapshots         -> 200 list[SnapshotRead] | 404
+  POST  /assets/{id}/snapshots/upsert  -> 200 SnapshotRead | 404
 """
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,3 +55,41 @@ async def list_snapshots(
         .order_by(AssetSnapshot.snapshot_date)
     )
     return result.scalars().all()
+
+
+@router.post("/upsert", response_model=SnapshotRead)
+async def upsert_snapshot(
+    asset_id: uuid.UUID,
+    payload: SnapshotCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Insert or update a snapshot for the given asset + date.
+
+    Uses PostgreSQL's `ON CONFLICT ... DO UPDATE` so calling this endpoint
+    twice with the same (asset_id, snapshot_date) updates the balance rather
+    than returning 409.  Always returns 200 — upsert is idempotent by design.
+
+    This is the "apply" primitive that the Phase 4 HITL agent will call after
+    the user approves the parsed ingestion result.
+    """
+    await get_asset_or_404(asset_id, db)
+
+    stmt = (
+        pg_insert(AssetSnapshot)
+        .values(
+            asset_id=asset_id,
+            snapshot_date=payload.snapshot_date,
+            balance=payload.balance,
+        )
+        .on_conflict_do_update(
+            constraint="uq_snapshot_asset_date",
+            set_={"balance": payload.balance},
+        )
+        .returning(AssetSnapshot)
+    )
+
+    result = await db.execute(stmt)
+    await db.commit()
+    snapshot = result.scalar_one()
+    return snapshot

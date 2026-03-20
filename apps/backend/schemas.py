@@ -96,3 +96,29 @@ class ProjectionResponse(BaseModel):
     months_to_fire: Optional[int] = None
     asset_summaries: list[AssetProjectionSchema]
     monthly: list[MonthlySliceSchema]
+
+
+# ---------------------------------------------------------------------------
+# Ingestion schemas (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+class IngestRequest(BaseModel):
+    """Free-form text or pasted CSV to parse into structured portfolio data."""
+    text: str
+
+
+class IngestResponse(BaseModel):
+    """
+    Result of the LangGraph ingestion pipeline.
+
+    The endpoint is parse-only — no DB writes happen here.  The caller uses
+    validated_assets / validated_snapshots to drive subsequent upsert calls,
+    or waits for the Phase 4 HITL agent to do it automatically.
+    """
+    parsed_assets: list[dict]        # raw LLM output before validation
+    parsed_snapshots: list[dict]     # raw LLM output before validation
+    validated_assets: list[dict]     # items that passed all validation rules
+    validated_snapshots: list[dict]  # items that passed all validation rules
+    validation_errors: list[str]     # human-readable descriptions of problems
+    is_valid: bool                   # True when validation_errors is empty
