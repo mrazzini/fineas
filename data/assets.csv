@@ -1,0 +1,13 @@
+name, asset_type, ticker, annualized_return_pct
+isyBank Liquidity,Cash,,0
+Vanguard FTSE All-World,Stocks,,0.085
+iShares MSCI World,Stocks,,0.086
+iShares MSCI EM,Stocks,,0.078
+iShares Global Agg. Bond,Bonds,,-0.0262
+Xtrackers EUR Overnight,Cash,,0.03985
+Lyxor SMART,Cash,,0.039
+Esketit,P2P Lending,,0.128
+Estateguru,P2P Lending,,0.1
+Robocash,P2P Lending,,0.01027
+Fonchim Crescita,Retirement fund,,0.04
+House,Real-Estate,,0.02
