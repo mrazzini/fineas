@@ -41,8 +41,11 @@ async def create_asset(payload: AssetCreate, db: AsyncSession = Depends(get_db))
 
 
 @router.get("", response_model=list[AssetRead])
-async def list_assets(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Asset).order_by(Asset.created_at))
+async def list_assets(include_archived: bool = False, db: AsyncSession = Depends(get_db)):
+    q = select(Asset).order_by(Asset.created_at)
+    if not include_archived:
+        q = q.where(Asset.is_archived == False)  # noqa: E712
+    result = await db.execute(q)
     return result.scalars().all()
 
 

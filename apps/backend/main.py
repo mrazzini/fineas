@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from database import engine
-from routers import assets, snapshots
+from routers import assets, ingest, portfolio, snapshots
 
 
 @asynccontextmanager
@@ -27,6 +27,8 @@ app = FastAPI(
 
 app.include_router(assets.router)
 app.include_router(snapshots.router)
+app.include_router(portfolio.router)
+app.include_router(ingest.router)
 
 
 @app.get("/health")

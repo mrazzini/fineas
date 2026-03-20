@@ -12,6 +12,8 @@ pydantic==2.10.3
 # AI / Agent (used in Phase 3 & 4)
 anthropic==0.40.0
 langgraph==0.2.60
+langchain-anthropic>=0.3.0   # ChatAnthropic — default provider
+langchain-openai>=0.2.0      # ChatOpenAI — used for OpenRouter + Groq (OpenAI-compat API)
 
 # Environment config
 python-dotenv==1.0.1
