@@ -20,6 +20,11 @@ from pydantic import BaseModel, ConfigDict
 from models import AssetType
 
 
+# ---------------------------------------------------------------------------
+# Asset schemas
+# ---------------------------------------------------------------------------
+
+
 class AssetCreate(BaseModel):
     name: str
     asset_type: AssetType
@@ -33,6 +38,7 @@ class AssetUpdate(BaseModel):
     asset_type: Optional[AssetType] = None
     annualized_return_pct: Optional[Decimal] = None
     ticker: Optional[str] = None
+    is_archived: Optional[bool] = None
 
 
 class AssetRead(BaseModel):
@@ -43,6 +49,7 @@ class AssetRead(BaseModel):
     asset_type: AssetType
     annualized_return_pct: Optional[Decimal] = None
     ticker: Optional[str] = None
+    is_archived: bool
     created_at: datetime
 
 
@@ -59,3 +66,33 @@ class SnapshotRead(BaseModel):
     snapshot_date: date
     balance: Decimal
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Projection / FIRE schemas
+# ---------------------------------------------------------------------------
+
+class AssetProjectionSchema(BaseModel):
+    """Per-asset summary: where it starts and where it ends up."""
+    asset_id: uuid.UUID
+    name: str
+    current_balance: Decimal
+    projected_balance: Decimal
+
+
+class MonthlySliceSchema(BaseModel):
+    """Portfolio state at one point in the projection timeline."""
+    month: int          # 1-indexed
+    date: date
+    portfolio_total: Decimal
+    # str(UUID) → balance; contributions are not shown per-asset
+    asset_balances: dict[str, Decimal]
+
+
+class ProjectionResponse(BaseModel):
+    current_total: Decimal
+    fire_target: Optional[Decimal] = None      # None when annual_expenses not supplied
+    fire_date: Optional[date] = None           # None when target not reached in window
+    months_to_fire: Optional[int] = None
+    asset_summaries: list[AssetProjectionSchema]
+    monthly: list[MonthlySliceSchema]

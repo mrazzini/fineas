@@ -80,3 +80,43 @@ async def test_delete_asset(client: AsyncClient):
     assert delete.status_code == 204
     get = await client.get(f"/assets/{asset_id}")
     assert get.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# is_archived soft-delete tests
+# ---------------------------------------------------------------------------
+
+async def test_archive_asset(client: AsyncClient):
+    """PATCH is_archived=True marks an asset as archived."""
+    create = await client.post("/assets", json={"name": "Old Fund", "asset_type": "BONDS"})
+    asset_id = create.json()["id"]
+
+    response = await client.patch(f"/assets/{asset_id}", json={"is_archived": True})
+    assert response.status_code == 200
+    assert response.json()["is_archived"] is True
+
+
+async def test_list_excludes_archived_by_default(client: AsyncClient):
+    """Default GET /assets should not return archived assets."""
+    await client.post("/assets", json={"name": "Visible", "asset_type": "CASH"})
+    create = await client.post("/assets", json={"name": "Hidden", "asset_type": "BONDS"})
+    await client.patch(f"/assets/{create.json()['id']}", json={"is_archived": True})
+
+    response = await client.get("/assets")
+    assert response.status_code == 200
+    names = [a["name"] for a in response.json()]
+    assert "Visible" in names
+    assert "Hidden" not in names
+
+
+async def test_list_includes_archived_with_query_param(client: AsyncClient):
+    """GET /assets?include_archived=true returns all assets including archived."""
+    await client.post("/assets", json={"name": "Active", "asset_type": "CASH"})
+    create = await client.post("/assets", json={"name": "Archived", "asset_type": "STOCKS"})
+    await client.patch(f"/assets/{create.json()['id']}", json={"is_archived": True})
+
+    response = await client.get("/assets?include_archived=true")
+    assert response.status_code == 200
+    names = [a["name"] for a in response.json()]
+    assert "Active" in names
+    assert "Archived" in names

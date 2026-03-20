@@ -10,9 +10,9 @@
 - [ ] Docker Compose setup (PostgreSQL + API)
 
 ## Phase 2: The Math
-- [ ] Deterministic projection engine (pure Python, no LLM)
-- [ ] Soft-delete / `is_archived` flag on `assets` (auditability)
-- [ ] FIRE target calculator (time-to-retirement given savings rate + return)
+- [x] Deterministic projection engine (pure Python, no LLM)
+- [x] Soft-delete / `is_archived` flag on `assets` (auditability)
+- [x] FIRE target calculator (time-to-retirement given savings rate + return)
 
 ## Phase 3: Smart Ingestion
 - [ ] LLM-powered parser: free-text / CSV → structured JSON

@@ -9,7 +9,7 @@ import enum
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -50,6 +50,10 @@ class Asset(Base):
     # Optional market ticker for future live-price lookups (e.g., "VWCE.DE").
     # Not UNIQUE: the same ETF can be held at multiple brokers as separate assets.
     ticker: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Soft-delete flag — archived assets are hidden from normal views but kept for audit.
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
