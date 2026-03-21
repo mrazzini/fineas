@@ -13,7 +13,7 @@ This is the Pydantic v2 replacement for orm_mode = True.
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -122,3 +122,46 @@ class IngestResponse(BaseModel):
     validated_snapshots: list[dict]  # items that passed all validation rules
     validation_errors: list[str]     # human-readable descriptions of problems
     is_valid: bool                   # True when validation_errors is empty
+
+
+# ---------------------------------------------------------------------------
+# HITL session schemas (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class StartSessionRequest(BaseModel):
+    """Start a new HITL ingestion session from free-form text."""
+    text: str
+
+
+class SessionResponse(BaseModel):
+    """
+    Current state of an ingestion session.
+
+    status values:
+      pending_review — graph is paused; human action required via POST .../resume
+      complete       — graph ran to END; data has been written to the DB
+      rejected       — human chose to discard; no DB writes occurred
+    """
+    session_id: str
+    status: Literal["pending_review", "complete", "rejected"]
+    validation_errors: list[str]
+    parsed_assets: list[dict]
+    parsed_snapshots: list[dict]
+    validated_assets: list[dict]
+    validated_snapshots: list[dict]
+    applied_assets_count: int
+    applied_snapshots_count: int
+
+
+class ResumeRequest(BaseModel):
+    """
+    Human decision for a paused ingestion session.
+
+    action values:
+      approve  — apply the items that already passed validation; skip re-validation
+      correct  — provide corrected data; graph re-validates before applying
+      reject   — discard the run; no DB writes
+    """
+    action: Literal["approve", "correct", "reject"]
+    corrections: Optional[dict] = None  # {"assets": [...], "snapshots": [...]}

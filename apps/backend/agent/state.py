@@ -10,6 +10,12 @@ Why TypedDict and not a dataclass or Pydantic model?
   LangGraph requires a plain dict-like type so it can do efficient merging.
   TypedDict gives us static-typing hints without the overhead of Pydantic
   validation on every state transition.
+
+Phase 4 adds HITL fields:
+  human_decision       — "approve" | "correct" | "reject" (set by human_review node)
+  human_corrections    — optional overrides from the user: {"assets": [...], "snapshots": [...]}
+  applied_assets_count — number of asset rows written to DB (set by apply node)
+  applied_snapshots_count — number of snapshot rows written to DB (set by apply node)
 """
 from typing import TypedDict
 
@@ -26,3 +32,9 @@ class IngestState(TypedDict):
     validated_assets: list[dict]     # items that passed all validation rules
     validated_snapshots: list[dict]  # items that passed all validation rules
     validation_errors: list[str]     # human-readable descriptions of any problems
+
+    # ── Phase 4: HITL ──────────────────────────────────────────────────────
+    human_decision: str        # "approve" | "correct" | "reject"
+    human_corrections: dict    # {"assets": [...], "snapshots": [...]}
+    applied_assets_count: int
+    applied_snapshots_count: int
