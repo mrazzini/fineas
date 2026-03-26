@@ -25,9 +25,21 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://fineas:fineas@db:5432/fineas
+      CORS_ORIGINS: http://localhost:3000
     depends_on:
       db:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: apps/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:8000
+    depends_on:
+      - api
 
 volumes:
   pgdata:
