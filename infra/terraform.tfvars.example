@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars and fill in values.
+# terraform.tfvars is gitignored — never commit it.
+
+aws_region     = "eu-central-1"
+project        = "fineas"
+ssh_public_key = "ssh-ed25519 AAAA... fineas-deploy"

@@ -5,6 +5,7 @@ uvicorn[standard]==0.32.1
 # Database — SQLAlchemy 2.0 async + PostgreSQL driver
 sqlalchemy==2.0.36
 asyncpg==0.30.0
+alembic>=1.13.0
 
 # Data validation (FastAPI schemas)
 pydantic==2.10.3

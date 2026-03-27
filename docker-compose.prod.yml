@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-fineas}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-fineas}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-fineas}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: { context: apps/backend }
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-fineas}:${DB_PASSWORD}@db:5432/${DB_NAME:-fineas}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      APP_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db: { condition: service_healthy }
+
+  frontend:
+    build: { context: apps/frontend }
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ""
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
