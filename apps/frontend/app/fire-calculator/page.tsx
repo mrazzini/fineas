@@ -9,8 +9,8 @@ import { ProjectionScenarioChart } from "@/components/fire/ProjectionScenarioCha
 import { BreakdownTable } from "@/components/fire/BreakdownTable";
 
 export default function FireCalculatorPage() {
-  const [contribution, setContribution] = useState(1200);
-  const [expenses, setExpenses] = useState(30000);
+  const [contribution, setContribution] = useState("1200");
+  const [expenses, setExpenses] = useState("30000");
   const [withdrawalRate, setWithdrawalRate] = useState(0.04);
   const [queryParams, setQueryParams] = useState({
     contribution: 1200,
@@ -60,8 +60,8 @@ export default function FireCalculatorPage() {
 
   const handleRecalculate = () => {
     setQueryParams({
-      contribution,
-      expenses,
+      contribution: Number(contribution) || 0,
+      expenses: Number(expenses) || 0,
       withdrawalRate,
     });
   };
