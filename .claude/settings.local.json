@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(curl:*)",
+      "Bash(cd C:\\\\Users\\\\Misterazzo\\\\Desktop\\\\GitHub\\\\fineas:*)",
+      "Bash(cd \"C:\\\\Users\\\\Misterazzo\\\\Desktop\\\\GitHub\\\\fineas\" && docker exec fineas-db-1 psql -U fineas -c \"\\\\dt\" 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\Misterazzo\\\\Desktop\\\\GitHub\\\\fineas\" && DATABASE_URL=postgresql+asyncpg://fineas:fineas@localhost:5432/fineas python scripts/seed.py 2>&1)"
+    ]
+  }
+}
