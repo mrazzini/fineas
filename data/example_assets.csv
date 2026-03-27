@@ -1,0 +1,7 @@
+name,asset_type,annualized_return_pct
+Emergency Fund,CASH,0
+Global Equities ETF,STOCKS,0.085
+Bond Index Fund,BONDS,0.032
+Money Market Fund,CASH,0.04
+Retirement Plan,PENSION_FUND,0.05
+Rental Property,REAL_ESTATE,0.03

@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """Seed the Fineas database with assets and historical snapshots from CSV files.
 
-Asset naming strategy: "simplified names" from snapshots.csv are canonical.
-  - 3 stock ETFs (Vanguard FTSE All-World, iShares MSCI World, iShares MSCI EM)
-    are consolidated into a single "Stocks" asset.
-  - "isyBank Liquidity" → "Cash"
-  - "Fonchim Crescita"  → "Fonchim"
-  - P2P Lending assets (Esketit, Estateguru, Robocash) → AssetType.OTHER
-  - "House" is seeded as an asset even though it has no snapshot history yet.
+By default, reads from data/example_assets.csv and data/example_snapshots.csv
+(fictional demo data tracked in git). To use real personal data instead, set:
+
+    SEED_ASSETS_CSV=data/assets.csv  SEED_SNAPSHOTS_CSV=data/snapshots.csv
 
 Usage (from repo root):
     DATABASE_URL=postgresql+asyncpg://user:pass@localhost/fineas python scripts/seed.py
@@ -33,74 +30,36 @@ from models import Asset, AssetSnapshot, AssetType
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-# ---------------------------------------------------------------------------
-# Canonical asset definitions
-# annualized_return_pct is capped at Numeric(6, 4) — 4 decimal places.
-# ---------------------------------------------------------------------------
-ASSETS: list[dict] = [
-    {
-        "name": "Cash",
-        "asset_type": AssetType.CASH,
-        "annualized_return_pct": Decimal("0.0000"),
-    },
-    {
-        # Consolidates: Vanguard FTSE All-World (0.085), iShares MSCI World (0.086),
-        # iShares MSCI EM (0.078). Using Vanguard FTSE All-World as the reference rate.
-        "name": "Stocks",
-        "asset_type": AssetType.STOCKS,
-        "annualized_return_pct": Decimal("0.0850"),
-    },
-    {
-        "name": "Bonds",
-        "asset_type": AssetType.BONDS,
-        "annualized_return_pct": Decimal("-0.0262"),
-    },
-    {
-        # 0.03985 rounded to 4 decimal places
-        "name": "Xtrackers EUR Overnight",
-        "asset_type": AssetType.CASH,
-        "annualized_return_pct": Decimal("0.0399"),
-    },
-    {
-        "name": "Lyxor SMART",
-        "asset_type": AssetType.CASH,
-        "annualized_return_pct": Decimal("0.0390"),
-    },
-    {
-        "name": "Esketit",
-        "asset_type": AssetType.OTHER,
-        "annualized_return_pct": Decimal("0.1280"),
-    },
-    {
-        "name": "Estateguru",
-        "asset_type": AssetType.OTHER,
-        "annualized_return_pct": Decimal("0.1000"),
-    },
-    {
-        # 0.01027 rounded to 4 decimal places
-        "name": "Robocash",
-        "asset_type": AssetType.OTHER,
-        "annualized_return_pct": Decimal("0.0103"),
-    },
-    {
-        "name": "Fonchim",
-        "asset_type": AssetType.PENSION_FUND,
-        "annualized_return_pct": Decimal("0.0400"),
-    },
-    {
-        "name": "House",
-        "asset_type": AssetType.REAL_ESTATE,
-        "annualized_return_pct": Decimal("0.0200"),
-    },
-]
+# Asset type mapping from CSV values to enum
+ASSET_TYPE_MAP = {
+    "CASH": AssetType.CASH,
+    "STOCKS": AssetType.STOCKS,
+    "BONDS": AssetType.BONDS,
+    "REAL_ESTATE": AssetType.REAL_ESTATE,
+    "CRYPTO": AssetType.CRYPTO,
+    "PENSION_FUND": AssetType.PENSION_FUND,
+    "OTHER": AssetType.OTHER,
+}
 
 
-async def seed_assets(session: AsyncSession) -> dict[str, object]:
-    """Insert assets, skip any that already exist. Returns name → UUID map."""
-    for asset_def in ASSETS:
+async def seed_assets(session: AsyncSession, csv_path: Path) -> dict[str, object]:
+    """Insert assets from CSV, skip any that already exist. Returns name -> UUID map."""
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f, skipinitialspace=True)
+        rows = list(reader)
+
+    for row in rows:
+        name = row["name"].strip()
+        asset_type = ASSET_TYPE_MAP[row["asset_type"].strip()]
+        annualized_return_pct = Decimal(row["annualized_return_pct"].strip())
+
         stmt = (
             pg_insert(Asset)
-            .values(**asset_def)
+            .values(
+                name=name,
+                asset_type=asset_type,
+                annualized_return_pct=annualized_return_pct,
+            )
             .on_conflict_do_nothing(index_elements=["name"])
         )
         await session.execute(stmt)
@@ -113,13 +72,13 @@ async def seed_assets(session: AsyncSession) -> dict[str, object]:
     return asset_ids
 
 
-async def seed_snapshots(session: AsyncSession, asset_ids: dict[str, object]) -> None:
-    """Insert snapshots from snapshots.csv, skipping duplicates."""
-    csv_path = DATA_DIR / "snapshots.csv"
+async def seed_snapshots(
+    session: AsyncSession, asset_ids: dict[str, object], csv_path: Path
+) -> None:
+    """Insert snapshots from CSV, skipping duplicates."""
     inserted = skipped_dup = skipped_unknown = 0
 
     with open(csv_path, newline="") as f:
-        # skipinitialspace strips leading whitespace after commas in header + values
         reader = csv.DictReader(f, skipinitialspace=True)
         rows = list(reader)
 
@@ -130,7 +89,7 @@ async def seed_snapshots(session: AsyncSession, asset_ids: dict[str, object]) ->
             print(f"  WARNING: No asset named '{asset_name}' — row skipped")
             continue
 
-        # snapshots.csv date format: DD/MM/YYYY
+        # snapshots CSV date format: DD/MM/YYYY
         day, month, year = row["snapshot_date"].strip().split("/")
         snap_date = date(int(year), int(month), int(day))
         balance = Decimal(row["balance"].strip())
@@ -163,15 +122,21 @@ async def main() -> None:
     if not url:
         sys.exit("ERROR: DATABASE_URL environment variable is not set.")
 
+    assets_csv = Path(os.environ.get("SEED_ASSETS_CSV", DATA_DIR / "example_assets.csv"))
+    snapshots_csv = Path(os.environ.get("SEED_SNAPSHOTS_CSV", DATA_DIR / "example_snapshots.csv"))
+
+    print(f"  Assets CSV:    {assets_csv}")
+    print(f"  Snapshots CSV: {snapshots_csv}")
+
     engine = create_async_engine(url, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as session:
-        print("=== Seeding assets ===")
-        asset_ids = await seed_assets(session)
+        print("\n=== Seeding assets ===")
+        asset_ids = await seed_assets(session, assets_csv)
 
         print("\n=== Seeding snapshots ===")
-        await seed_snapshots(session, asset_ids)
+        await seed_snapshots(session, asset_ids, snapshots_csv)
 
     await engine.dispose()
     print("\nSeed complete.")

@@ -52,3 +52,12 @@ npm-debug.log*
 *.tfvars
 .terraform.lock.hcl
 tfplan
+
+# Claude Code
+CLAUDE.md
+.claude/
+
+# Data (real personal financial data — example files are tracked separately)
+data/*
+!data/example_assets.csv
+!data/example_snapshots.csv
