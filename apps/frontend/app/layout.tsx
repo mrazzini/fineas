@@ -21,7 +21,7 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Fineas — FIRE Copilot",
+  title: "Fineas - FIRE Copilot",
   description: "Track assets, project FIRE trajectories, and manage your portfolio.",
 };
 
