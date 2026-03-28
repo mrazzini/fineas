@@ -1,4 +1,5 @@
 # Fineas - An Agentic FIRE Copilot
+[**LIVE DEMO**](https://3.69.248.127.nip.io/)
 
 A full-stack personal finance tracker that calculates FIRE (Financial Independence, Retire Early) trajectories and uses LLMs to lower the friction of data entry.
 
