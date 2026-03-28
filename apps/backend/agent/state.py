@@ -26,3 +26,8 @@ class IngestState(TypedDict):
     validated_assets: list[dict]     # items that passed all validation rules
     validated_snapshots: list[dict]  # items that passed all validation rules
     validation_errors: list[str]     # human-readable descriptions of any problems
+
+    # ── After the [apply] node (Phase 4) ─────────────────────────────────
+    applied_assets: list[dict]       # assets created or matched in DB
+    applied_snapshots: list[dict]    # snapshots upserted in DB
+    apply_errors: list[str]          # per-item failures during apply

@@ -122,3 +122,22 @@ class IngestResponse(BaseModel):
     validated_snapshots: list[dict]  # items that passed all validation rules
     validation_errors: list[str]     # human-readable descriptions of problems
     is_valid: bool                   # True when validation_errors is empty
+
+
+# ---------------------------------------------------------------------------
+# Apply schemas (Phase 4 — HITL)
+# ---------------------------------------------------------------------------
+
+
+class ApplyRequest(BaseModel):
+    """Human-approved data to write to the database in one transaction."""
+    validated_assets: list[dict]
+    validated_snapshots: list[dict]
+
+
+class ApplyResponse(BaseModel):
+    """Result of the apply step — what was written and any per-item errors."""
+    applied_assets: list[dict]
+    applied_snapshots: list[dict]
+    apply_errors: list[str]
+    success: bool

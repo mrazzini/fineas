@@ -28,8 +28,10 @@ In Phase 4 this will grow: a conditional edge after [validate] will route to
 a human-approval node when is_valid is False, and to an [apply] node when True.
 """
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.nodes import parse, validate
+from agent.nodes import make_apply_node, parse, validate
 from agent.state import IngestState
 
 # ── Build ──────────────────────────────────────────────────────────────────
@@ -46,3 +48,38 @@ _builder.add_edge("validate", END)
 # compile() validates that every node is reachable and that there are no
 # dead ends, then returns a CompiledGraph with .invoke() / .ainvoke() methods.
 ingest_graph = _builder.compile()
+
+
+# ── Phase 4: Apply graph (per-request, needs a DB session) ────────────────
+
+def build_apply_graph(db: AsyncSession) -> CompiledStateGraph:
+    """
+    Build a one-node graph that writes validated data to the database.
+
+    Not a singleton — each invocation needs its own DB session so we build
+    a fresh graph per request.
+    """
+    apply_node = make_apply_node(db)
+    builder = StateGraph(IngestState)
+    builder.add_node("apply", apply_node)
+    builder.add_edge(START, "apply")
+    builder.add_edge("apply", END)
+    return builder.compile()
+
+
+def build_pipeline_graph(db: AsyncSession) -> CompiledStateGraph:
+    """
+    Full pipeline: parse -> validate -> apply.
+
+    Useful for non-interactive flows where no HITL review is needed.
+    """
+    apply_node = make_apply_node(db)
+    builder = StateGraph(IngestState)
+    builder.add_node("parse", parse)
+    builder.add_node("validate", validate)
+    builder.add_node("apply", apply_node)
+    builder.add_edge(START, "parse")
+    builder.add_edge("parse", "validate")
+    builder.add_edge("validate", "apply")
+    builder.add_edge("apply", END)
+    return builder.compile()

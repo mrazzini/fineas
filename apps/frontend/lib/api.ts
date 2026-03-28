@@ -7,6 +7,8 @@ import type {
   ProjectionResponse,
   IngestRequest,
   IngestResponse,
+  ApplyRequest,
+  ApplyResponse,
 } from "./types";
 
 const BASE = "/api";
@@ -97,6 +99,12 @@ export const getProjection = (params?: {
 // ---------------------------------------------------------------------------
 export const ingestText = (data: IngestRequest) =>
   request<IngestResponse>("/ingest", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const applyIngest = (data: ApplyRequest) =>
+  request<ApplyResponse>("/ingest/apply", {
     method: "POST",
     body: JSON.stringify(data),
   });

@@ -11,14 +11,19 @@ Two nodes:
   [parse]    — calls the LLM, returns parsed_assets + parsed_snapshots
   [validate] — pure Python checks, returns validated_* + validation_errors
 """
-from datetime import datetime
+from datetime import date, datetime
+from typing import Callable
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.llm import get_llm
 from agent.llm_schemas import ParsedPortfolioUpdate
 from agent.prompts import PARSE_SYSTEM_PROMPT
 from agent.state import IngestState
+from models import Asset, AssetSnapshot, AssetType
 
 # Valid asset_type values (lower-cased for case-insensitive matching).
 # Maps common aliases → canonical enum value.
@@ -151,3 +156,114 @@ async def validate(state: IngestState) -> dict:
         "validated_snapshots": validated_snapshots,
         "validation_errors": errors,
     }
+
+
+def make_apply_node(db: AsyncSession) -> Callable:
+    """
+    Factory: returns an async node function that writes validated data to the DB.
+
+    Takes an AsyncSession so each invocation gets its own transaction context.
+    The node does find-or-create for assets and upsert for snapshots in a single
+    commit, accumulating per-item errors in apply_errors.
+    """
+
+    async def apply(state: IngestState) -> dict:
+        applied_assets: list[dict] = []
+        applied_snapshots: list[dict] = []
+        apply_errors: list[str] = []
+        name_to_id: dict[str, str] = {}
+
+        # ── Find-or-create assets ───────────────────────────────────────
+        for asset_data in state.get("validated_assets", []):
+            name = asset_data.get("name", "")
+            try:
+                # Check if asset already exists
+                result = await db.execute(
+                    select(Asset).where(Asset.name == name)
+                )
+                existing = result.scalar_one_or_none()
+
+                if existing:
+                    name_to_id[name.lower()] = str(existing.id)
+                    applied_assets.append({
+                        "name": existing.name,
+                        "asset_id": str(existing.id),
+                        "status": "matched",
+                    })
+                else:
+                    # Resolve asset_type enum
+                    raw_type = asset_data.get("asset_type", "OTHER")
+                    try:
+                        asset_type = AssetType(raw_type)
+                    except ValueError:
+                        apply_errors.append(
+                            f"Asset '{name}': invalid asset_type '{raw_type}'."
+                        )
+                        continue
+
+                    new_asset = Asset(
+                        name=name,
+                        asset_type=asset_type,
+                        ticker=asset_data.get("ticker"),
+                        annualized_return_pct=asset_data.get("annualized_return_pct"),
+                    )
+                    db.add(new_asset)
+                    await db.flush()  # get the generated id
+                    name_to_id[name.lower()] = str(new_asset.id)
+                    applied_assets.append({
+                        "name": new_asset.name,
+                        "asset_id": str(new_asset.id),
+                        "status": "created",
+                    })
+            except Exception as exc:
+                apply_errors.append(f"Asset '{name}': {exc}")
+
+        # ── Upsert snapshots ────────────────────────────────────────────
+        for snap_data in state.get("validated_snapshots", []):
+            asset_name = snap_data.get("asset_name", "")
+            asset_id = name_to_id.get(asset_name.lower())
+
+            if not asset_id:
+                apply_errors.append(
+                    f"Snapshot for '{asset_name}': no matching asset found."
+                )
+                continue
+
+            try:
+                # Convert string date to date object for asyncpg
+                snap_date = snap_data["snapshot_date"]
+                if isinstance(snap_date, str):
+                    snap_date = date.fromisoformat(snap_date)
+
+                stmt = pg_insert(AssetSnapshot).values(
+                    asset_id=asset_id,
+                    snapshot_date=snap_date,
+                    balance=snap_data["balance"],
+                )
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_snapshot_asset_date",
+                    set_={"balance": stmt.excluded.balance},
+                )
+                await db.execute(stmt)
+                applied_snapshots.append({
+                    "asset_name": asset_name,
+                    "asset_id": asset_id,
+                    "snapshot_date": snap_data["snapshot_date"],
+                    "balance": snap_data["balance"],
+                    "status": "upserted",
+                })
+            except Exception as exc:
+                apply_errors.append(
+                    f"Snapshot for '{asset_name}' on "
+                    f"{snap_data.get('snapshot_date', '?')}: {exc}"
+                )
+
+        await db.commit()
+
+        return {
+            "applied_assets": applied_assets,
+            "applied_snapshots": applied_snapshots,
+            "apply_errors": apply_errors,
+        }
+
+    return apply

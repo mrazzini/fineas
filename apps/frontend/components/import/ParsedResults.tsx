@@ -6,9 +6,19 @@ import type { IngestResponse } from "@/lib/types";
 
 interface ParsedResultsProps {
   result: IngestResponse;
+  selectedAssets: Set<number>;
+  selectedSnapshots: Set<number>;
+  onToggleAsset: (index: number) => void;
+  onToggleSnapshot: (index: number) => void;
 }
 
-export function ParsedResults({ result }: ParsedResultsProps) {
+export function ParsedResults({
+  result,
+  selectedAssets,
+  selectedSnapshots,
+  onToggleAsset,
+  onToggleSnapshot,
+}: ParsedResultsProps) {
   return (
     <div className="bg-surface-container-low rounded-xl p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -41,15 +51,21 @@ export function ParsedResults({ result }: ParsedResultsProps) {
       {result.validated_assets.length > 0 && (
         <div>
           <h3 className="text-xs font-label text-on-surface-variant uppercase tracking-wider mb-3">
-            Assets ({result.validated_assets.length})
+            Assets ({selectedAssets.size}/{result.validated_assets.length})
           </h3>
           <div className="space-y-2">
             {result.validated_assets.map((asset, i) => (
-              <div
+              <label
                 key={i}
-                className="flex items-center justify-between bg-surface-container rounded-lg p-3"
+                className="flex items-center justify-between bg-surface-container rounded-lg p-3 cursor-pointer hover:bg-surface-container-high/30 transition-colors"
               >
                 <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedAssets.has(i)}
+                    onChange={() => onToggleAsset(i)}
+                    className="h-4 w-4 rounded border-outline text-primary focus:ring-primary"
+                  />
                   <span className="text-sm text-on-surface font-medium">
                     {String(asset.name ?? "")}
                   </span>
@@ -67,7 +83,7 @@ export function ParsedResults({ result }: ParsedResultsProps) {
                     {String(asset.annualized_return_pct)}
                   </span>
                 )}
-              </div>
+              </label>
             ))}
           </div>
         </div>
@@ -77,12 +93,14 @@ export function ParsedResults({ result }: ParsedResultsProps) {
       {result.validated_snapshots.length > 0 && (
         <div>
           <h3 className="text-xs font-label text-on-surface-variant uppercase tracking-wider mb-3">
-            Snapshots ({result.validated_snapshots.length})
+            Snapshots ({selectedSnapshots.size}/{result.validated_snapshots.length})
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr>
+                  <th className="text-xs font-label text-on-surface-variant uppercase tracking-wider text-left px-3 py-2 w-8">
+                  </th>
                   <th className="text-xs font-label text-on-surface-variant uppercase tracking-wider text-left px-3 py-2">
                     Asset
                   </th>
@@ -98,8 +116,17 @@ export function ParsedResults({ result }: ParsedResultsProps) {
                 {result.validated_snapshots.map((snap, i) => (
                   <tr
                     key={i}
-                    className="hover:bg-surface-container-high/30 transition-colors"
+                    className="hover:bg-surface-container-high/30 transition-colors cursor-pointer"
+                    onClick={() => onToggleSnapshot(i)}
                   >
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedSnapshots.has(i)}
+                        onChange={() => onToggleSnapshot(i)}
+                        className="h-4 w-4 rounded border-outline text-primary focus:ring-primary"
+                      />
+                    </td>
                     <td className="px-3 py-2 text-sm text-on-surface">
                       {String(snap.asset_name ?? snap.name ?? "")}
                     </td>

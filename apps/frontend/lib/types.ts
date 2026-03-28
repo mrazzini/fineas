@@ -80,3 +80,15 @@ export interface IngestResponse {
   validation_errors: string[];
   is_valid: boolean;
 }
+
+export interface ApplyRequest {
+  validated_assets: Record<string, unknown>[];
+  validated_snapshots: Record<string, unknown>[];
+}
+
+export interface ApplyResponse {
+  applied_assets: Record<string, unknown>[];
+  applied_snapshots: Record<string, unknown>[];
+  apply_errors: string[];
+  success: boolean;
+}

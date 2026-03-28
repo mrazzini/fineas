@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ingestText, getAssets, createAsset, upsertSnapshot } from "@/lib/api";
+import { ingestText, applyIngest } from "@/lib/api";
 import { InputPanel } from "@/components/import/InputPanel";
 import { ParsedResults } from "@/components/import/ParsedResults";
 import { ConfirmBar } from "@/components/import/ConfirmBar";
-import type { IngestResponse, AssetCreate } from "@/lib/types";
+import type { IngestResponse } from "@/lib/types";
 
 export default function ImportPage() {
   const queryClient = useQueryClient();
@@ -14,14 +14,41 @@ export default function ImportPage() {
   const [result, setResult] = useState<IngestResponse | null>(null);
   const [confirmError, setConfirmError] = useState("");
 
+  // ── Selection state ────────────────────────────────────────────────────
+  const [selectedAssets, setSelectedAssets] = useState<Set<number>>(new Set());
+  const [selectedSnapshots, setSelectedSnapshots] = useState<Set<number>>(new Set());
+
+  const toggleAsset = useCallback((index: number) => {
+    setSelectedAssets((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
+  const toggleSnapshot = useCallback((index: number) => {
+    setSelectedSnapshots((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
+  // ── Parse mutation ─────────────────────────────────────────────────────
   const parseMutation = useMutation({
     mutationFn: () => ingestText({ text }),
     onSuccess: (data) => {
       setResult(data);
       setConfirmError("");
+      // Select all items by default
+      setSelectedAssets(new Set(data.validated_assets.map((_, i) => i)));
+      setSelectedSnapshots(new Set(data.validated_snapshots.map((_, i) => i)));
     },
   });
 
+  // ── Confirm (apply) ────────────────────────────────────────────────────
   const [isConfirming, setIsConfirming] = useState(false);
 
   const handleConfirm = async () => {
@@ -30,55 +57,22 @@ export default function ImportPage() {
     setConfirmError("");
 
     try {
-      // 1. Get existing assets to match by name
-      const existing = await getAssets();
-      const nameToId: Record<string, string> = {};
-      for (const a of existing) {
-        nameToId[a.name.toLowerCase()] = a.id;
+      // Filter to only selected items
+      const assets = result.validated_assets.filter((_, i) => selectedAssets.has(i));
+      const snapshots = result.validated_snapshots.filter((_, i) => selectedSnapshots.has(i));
+
+      const response = await applyIngest({
+        validated_assets: assets,
+        validated_snapshots: snapshots,
+      });
+
+      if (!response.success) {
+        setConfirmError(
+          `Partial errors: ${response.apply_errors.join("; ")}`
+        );
       }
 
-      // 2. Create new assets
-      for (const rawAsset of result.validated_assets) {
-        const name = String(rawAsset.name ?? "");
-        if (nameToId[name.toLowerCase()]) continue;
-
-        try {
-          const created = await createAsset({
-            name,
-            asset_type: String(rawAsset.asset_type ?? "OTHER"),
-            ticker: rawAsset.ticker ? String(rawAsset.ticker) : null,
-            annualized_return_pct: rawAsset.annualized_return_pct
-              ? String(rawAsset.annualized_return_pct)
-              : null,
-          } as AssetCreate);
-          nameToId[name.toLowerCase()] = created.id;
-        } catch (err: unknown) {
-          // 409 = already exists, try to find it
-          if (err instanceof Error && err.message.includes("409")) {
-            const refreshed = await getAssets();
-            const found = refreshed.find(
-              (a) => a.name.toLowerCase() === name.toLowerCase()
-            );
-            if (found) nameToId[name.toLowerCase()] = found.id;
-          }
-        }
-      }
-
-      // 3. Upsert snapshots
-      for (const rawSnap of result.validated_snapshots) {
-        const assetName = String(
-          rawSnap.asset_name ?? rawSnap.name ?? ""
-        ).toLowerCase();
-        const assetId = nameToId[assetName];
-        if (!assetId) continue;
-
-        await upsertSnapshot(assetId, {
-          snapshot_date: String(rawSnap.snapshot_date ?? ""),
-          balance: String(rawSnap.balance ?? "0"),
-        });
-      }
-
-      // 4. Done — clear state and refresh
+      // Refresh asset-related queries
       queryClient.invalidateQueries({ queryKey: ["assets"] });
       queryClient.invalidateQueries({ queryKey: ["latestBalances"] });
       setResult(null);
@@ -94,6 +88,8 @@ export default function ImportPage() {
     setResult(null);
     setConfirmError("");
   };
+
+  const hasSelection = selectedAssets.size > 0 || selectedSnapshots.size > 0;
 
   return (
     <div className={`py-8 space-y-6 ${result ? "pb-24" : ""}`}>
@@ -121,7 +117,15 @@ export default function ImportPage() {
         </div>
       )}
 
-      {result && <ParsedResults result={result} />}
+      {result && (
+        <ParsedResults
+          result={result}
+          selectedAssets={selectedAssets}
+          selectedSnapshots={selectedSnapshots}
+          onToggleAsset={toggleAsset}
+          onToggleSnapshot={toggleSnapshot}
+        />
+      )}
 
       {confirmError && (
         <div className="bg-error/5 rounded-lg p-4">
@@ -134,7 +138,7 @@ export default function ImportPage() {
           onDiscard={handleDiscard}
           onConfirm={handleConfirm}
           isConfirming={isConfirming}
-          disabled={!result.is_valid}
+          disabled={!result.is_valid || !hasSelection}
         />
       )}
     </div>
