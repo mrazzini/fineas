@@ -15,13 +15,13 @@ from datetime import date, datetime
 from typing import Callable
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.llm import get_llm
 from agent.llm_schemas import ParsedPortfolioUpdate
-from agent.prompts import PARSE_SYSTEM_PROMPT
+from agent.prompts import PARSE_SYSTEM_PROMPT, ExistingAsset, build_parse_prompt
 from agent.state import IngestState
 from models import Asset, AssetSnapshot, AssetType
 
@@ -71,6 +71,82 @@ async def parse(state: IngestState) -> dict:
         "parsed_assets": [a.model_dump() for a in result.assets],
         "parsed_snapshots": [s.model_dump() for s in result.snapshots],
     }
+
+
+async def _fetch_existing_assets(db: AsyncSession) -> list[ExistingAsset]:
+    """
+    Return all non-archived assets with their most recent balance in one query.
+
+    Uses ROW_NUMBER() over (PARTITION BY asset_id ORDER BY snapshot_date DESC)
+    to get the latest snapshot per asset without N+1 queries.
+    Assets with no snapshots get latest_balance=None.
+    """
+    ranked = (
+        select(
+            AssetSnapshot.asset_id,
+            AssetSnapshot.balance,
+            func.row_number()
+                .over(
+                    partition_by=AssetSnapshot.asset_id,
+                    order_by=AssetSnapshot.snapshot_date.desc(),
+                )
+                .label("rn"),
+        )
+        .subquery()
+    )
+    stmt = (
+        select(
+            Asset.name,
+            Asset.asset_type,
+            Asset.ticker,
+            ranked.c.balance.label("latest_balance"),
+        )
+        .where(Asset.is_archived == False)  # noqa: E712
+        .outerjoin(ranked, (Asset.id == ranked.c.asset_id) & (ranked.c.rn == 1))
+        .order_by(Asset.name)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        ExistingAsset(
+            name=row.name,
+            asset_type=str(
+                row.asset_type.value
+                if hasattr(row.asset_type, "value")
+                else row.asset_type
+            ),
+            ticker=row.ticker,
+            latest_balance=float(row.latest_balance) if row.latest_balance is not None else None,
+        )
+        for row in rows
+    ]
+
+
+def make_parse_node(db: AsyncSession) -> Callable:
+    """
+    Factory: returns a parse node that fetches existing portfolio assets from
+    the DB and injects them into the LLM prompt before extraction.
+
+    Used by `build_context_ingest_graph` in the production endpoint.
+    The bare `parse` function above is kept for the static `ingest_graph`
+    singleton (used by all mocked tests) — zero regressions.
+    """
+
+    async def parse_with_context(state: IngestState) -> dict:
+        existing_assets = await _fetch_existing_assets(db)
+        prompt = build_parse_prompt(existing_assets)
+
+        llm = get_llm()
+        structured_llm = llm.with_structured_output(ParsedPortfolioUpdate)
+        result: ParsedPortfolioUpdate = await structured_llm.ainvoke([
+            SystemMessage(content=prompt),
+            HumanMessage(content=state["raw_text"]),
+        ])
+        return {
+            "parsed_assets": [a.model_dump() for a in result.assets],
+            "parsed_snapshots": [s.model_dump() for s in result.snapshots],
+        }
+
+    return parse_with_context
 
 
 def _normalise_asset_type(raw: str) -> str | None:
@@ -151,10 +227,29 @@ async def validate(state: IngestState) -> dict:
         if item_ok:
             validated_snapshots.append(snap)
 
+    # ── Detect ambiguous assets ────────────────────────────────────────────
+    # Assets where the LLM returned match_candidates need user disambiguation.
+    # Surface them separately and strip the field from validated_assets so it
+    # doesn't leak into the HTTP response or confuse the apply node.
+    ambiguous: list[dict] = []
+    for i, asset in enumerate(validated_assets):
+        candidates = asset.get("match_candidates")
+        if candidates:
+            ambiguous.append({
+                "asset_index": i,
+                "original_name": asset["name"],
+                "candidates": candidates,
+            })
+    validated_assets = [
+        {k: v for k, v in a.items() if k != "match_candidates"}
+        for a in validated_assets
+    ]
+
     return {
         "validated_assets": validated_assets,
         "validated_snapshots": validated_snapshots,
         "validation_errors": errors,
+        "ambiguous_assets": ambiguous,
     }
 
 
@@ -176,6 +271,8 @@ def make_apply_node(db: AsyncSession) -> Callable:
         # ── Find-or-create assets ───────────────────────────────────────
         for asset_data in state.get("validated_assets", []):
             name = asset_data.get("name", "")
+            # Apply any user-supplied disambiguation: "ETF" → "Global Equity ETF"
+            name = state.get("resolved_names", {}).get(name, name)
             try:
                 # Check if asset already exists
                 result = await db.execute(
@@ -221,7 +318,9 @@ def make_apply_node(db: AsyncSession) -> Callable:
         # ── Upsert snapshots ────────────────────────────────────────────
         for snap_data in state.get("validated_snapshots", []):
             asset_name = snap_data.get("asset_name", "")
-            asset_id = name_to_id.get(asset_name.lower())
+            # Resolve the snapshot's asset_name using the same disambiguation map
+            resolved_asset_name = state.get("resolved_names", {}).get(asset_name, asset_name)
+            asset_id = name_to_id.get(resolved_asset_name.lower())
 
             if not asset_id:
                 apply_errors.append(

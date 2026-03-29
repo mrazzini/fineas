@@ -31,7 +31,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.nodes import make_apply_node, parse, validate
+from agent.nodes import make_apply_node, make_parse_node, parse, validate
 from agent.state import IngestState
 
 # ── Build ──────────────────────────────────────────────────────────────────
@@ -51,6 +51,23 @@ ingest_graph = _builder.compile()
 
 
 # ── Phase 4: Apply graph (per-request, needs a DB session) ────────────────
+
+def build_context_ingest_graph(db: AsyncSession) -> CompiledStateGraph:
+    """
+    Parse+validate graph where the parse node fetches the user's existing
+    portfolio from the DB and injects it into the LLM prompt.
+
+    Used by the production POST /ingest endpoint.  Per-request (not a
+    singleton) because each request needs its own DB session.
+    """
+    builder = StateGraph(IngestState)
+    builder.add_node("parse", make_parse_node(db))
+    builder.add_node("validate", validate)
+    builder.add_edge(START, "parse")
+    builder.add_edge("parse", "validate")
+    builder.add_edge("validate", END)
+    return builder.compile()
+
 
 def build_apply_graph(db: AsyncSession) -> CompiledStateGraph:
     """

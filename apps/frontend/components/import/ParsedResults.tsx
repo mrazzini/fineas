@@ -1,8 +1,7 @@
 "use client";
 
 import { AssetBadge } from "@/components/ui/AssetBadge";
-import type { AssetType } from "@/lib/types";
-import type { IngestResponse } from "@/lib/types";
+import type { AssetType, IngestResponse } from "@/lib/types";
 
 interface ParsedResultsProps {
   result: IngestResponse;
@@ -10,6 +9,8 @@ interface ParsedResultsProps {
   selectedSnapshots: Set<number>;
   onToggleAsset: (index: number) => void;
   onToggleSnapshot: (index: number) => void;
+  resolvedNames: Record<string, string>;
+  onResolve: (originalName: string, chosenName: string) => void;
 }
 
 export function ParsedResults({
@@ -18,6 +19,8 @@ export function ParsedResults({
   selectedSnapshots,
   onToggleAsset,
   onToggleSnapshot,
+  resolvedNames,
+  onResolve,
 }: ParsedResultsProps) {
   return (
     <div className="bg-surface-container-low rounded-xl p-6 space-y-6">
@@ -43,6 +46,50 @@ export function ParsedResults({
             <p key={i} className="text-sm text-error">
               {err}
             </p>
+          ))}
+        </div>
+      )}
+
+      {/* Disambiguation — shown when the LLM found multiple possible existing assets */}
+      {result.ambiguous_assets.length > 0 && (
+        <div className="bg-surface-container rounded-lg p-4 space-y-4 border border-outline-variant/30">
+          <p className="text-xs font-label text-on-surface-variant uppercase tracking-wider">
+            Ambiguous matches — select which existing asset was meant
+          </p>
+          {result.ambiguous_assets.map((amb) => (
+            <div key={amb.original_name} className="space-y-2">
+              <p className="text-sm text-on-surface">
+                <span className="font-medium">"{amb.original_name}"</span> could refer to:
+              </p>
+              <div className="space-y-1 pl-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name={`resolve-${amb.original_name}`}
+                    value="__new__"
+                    checked={!(amb.original_name in resolvedNames)}
+                    onChange={() => onResolve(amb.original_name, "__new__")}
+                    className="h-4 w-4 text-primary"
+                  />
+                  <span className="text-sm text-on-surface-variant italic">
+                    Create as new asset: "{amb.original_name}"
+                  </span>
+                </label>
+                {amb.candidates.map((candidate) => (
+                  <label key={candidate} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name={`resolve-${amb.original_name}`}
+                      value={candidate}
+                      checked={resolvedNames[amb.original_name] === candidate}
+                      onChange={() => onResolve(amb.original_name, candidate)}
+                      className="h-4 w-4 text-primary"
+                    />
+                    <span className="text-sm text-on-surface font-medium">{candidate}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}

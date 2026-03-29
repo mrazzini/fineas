@@ -16,7 +16,13 @@ from pydantic import BaseModel, Field
 
 class ParsedAsset(BaseModel):
     """One financial asset the LLM found in the input text."""
-    name: str = Field(description="Human-readable name of the asset, e.g. 'Vanguard FTSE All-World ETF'")
+    name: str = Field(
+        description=(
+            "The asset name. If this clearly matches one of the existing portfolio assets "
+            "listed in the prompt, use that asset's exact name. Otherwise use a concise "
+            "descriptive label, e.g. 'Vanguard FTSE All-World ETF'."
+        )
+    )
     asset_type: str = Field(
         description=(
             "Category of the asset. Must be one of: CASH, STOCKS, BONDS, "
@@ -32,6 +38,15 @@ class ParsedAsset(BaseModel):
         description=(
             "Expected annual return as a decimal fraction, e.g. 0.085 for 8.5%. "
             "Include only if explicitly stated in the text."
+        )
+    )
+    match_candidates: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Only populate when you cannot determine which existing portfolio asset "
+            "the user is referring to. List the exact names of 2–4 candidate assets "
+            "from the EXISTING PORTFOLIO ASSETS section. Omit this field entirely "
+            "when you are confident about the match or when the asset is clearly new."
         )
     )
 

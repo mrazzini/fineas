@@ -8,6 +8,7 @@ import { ParsedResults } from "@/components/import/ParsedResults";
 import { ConfirmBar } from "@/components/import/ConfirmBar";
 import type { IngestResponse } from "@/lib/types";
 
+
 export default function ImportPage() {
   const queryClient = useQueryClient();
   const [text, setText] = useState("");
@@ -17,6 +18,19 @@ export default function ImportPage() {
   // ── Selection state ────────────────────────────────────────────────────
   const [selectedAssets, setSelectedAssets] = useState<Set<number>>(new Set());
   const [selectedSnapshots, setSelectedSnapshots] = useState<Set<number>>(new Set());
+  const [resolvedNames, setResolvedNames] = useState<Record<string, string>>({});
+
+  const handleResolve = useCallback((originalName: string, chosenName: string) => {
+    setResolvedNames((prev) => {
+      const next = { ...prev };
+      if (chosenName === "__new__") {
+        delete next[originalName];
+      } else {
+        next[originalName] = chosenName;
+      }
+      return next;
+    });
+  }, []);
 
   const toggleAsset = useCallback((index: number) => {
     setSelectedAssets((prev) => {
@@ -42,6 +56,7 @@ export default function ImportPage() {
     onSuccess: (data) => {
       setResult(data);
       setConfirmError("");
+      setResolvedNames({});
       // Select all items by default
       setSelectedAssets(new Set(data.validated_assets.map((_, i) => i)));
       setSelectedSnapshots(new Set(data.validated_snapshots.map((_, i) => i)));
@@ -64,6 +79,9 @@ export default function ImportPage() {
       const response = await applyIngest({
         validated_assets: assets,
         validated_snapshots: snapshots,
+        resolved_names: Object.fromEntries(
+          Object.entries(resolvedNames).filter(([, v]) => v !== "__new__")
+        ),
       });
 
       if (!response.success) {
@@ -87,6 +105,7 @@ export default function ImportPage() {
   const handleDiscard = () => {
     setResult(null);
     setConfirmError("");
+    setResolvedNames({});
   };
 
   const hasSelection = selectedAssets.size > 0 || selectedSnapshots.size > 0;
@@ -124,6 +143,8 @@ export default function ImportPage() {
           selectedSnapshots={selectedSnapshots}
           onToggleAsset={toggleAsset}
           onToggleSnapshot={toggleSnapshot}
+          resolvedNames={resolvedNames}
+          onResolve={handleResolve}
         />
       )}
 
