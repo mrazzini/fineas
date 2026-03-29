@@ -72,6 +72,12 @@ export interface IngestRequest {
   text: string;
 }
 
+export interface AmbiguousAsset {
+  asset_index: number;
+  original_name: string;
+  candidates: string[];
+}
+
 export interface IngestResponse {
   parsed_assets: Record<string, unknown>[];
   parsed_snapshots: Record<string, unknown>[];
@@ -79,11 +85,13 @@ export interface IngestResponse {
   validated_snapshots: Record<string, unknown>[];
   validation_errors: string[];
   is_valid: boolean;
+  ambiguous_assets: AmbiguousAsset[];
 }
 
 export interface ApplyRequest {
   validated_assets: Record<string, unknown>[];
   validated_snapshots: Record<string, unknown>[];
+  resolved_names: Record<string, string>;
 }
 
 export interface ApplyResponse {

@@ -26,6 +26,12 @@ class IngestState(TypedDict):
     validated_assets: list[dict]     # items that passed all validation rules
     validated_snapshots: list[dict]  # items that passed all validation rules
     validation_errors: list[str]     # human-readable descriptions of any problems
+    # Assets whose name is ambiguous — each entry: {asset_index, original_name, candidates}
+    ambiguous_assets: list[dict]
+
+    # ── Disambiguation (user-supplied via ApplyRequest) ────────────────────
+    # Maps original LLM-extracted name → user-chosen existing asset name
+    resolved_names: dict[str, str]
 
     # ── After the [apply] node (Phase 4) ─────────────────────────────────
     applied_assets: list[dict]       # assets created or matched in DB

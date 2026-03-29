@@ -122,6 +122,7 @@ class IngestResponse(BaseModel):
     validated_snapshots: list[dict]  # items that passed all validation rules
     validation_errors: list[str]     # human-readable descriptions of problems
     is_valid: bool                   # True when validation_errors is empty
+    ambiguous_assets: list[dict] = []  # assets whose name matched multiple existing assets
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +134,7 @@ class ApplyRequest(BaseModel):
     """Human-approved data to write to the database in one transaction."""
     validated_assets: list[dict]
     validated_snapshots: list[dict]
+    resolved_names: dict[str, str] = {}  # original LLM name → chosen existing asset name
 
 
 class ApplyResponse(BaseModel):

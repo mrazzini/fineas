@@ -9,7 +9,7 @@ Route summary:
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent import build_apply_graph, ingest_graph
+from agent import build_apply_graph, build_context_ingest_graph
 from database import get_db
 from schemas import ApplyRequest, ApplyResponse, IngestRequest, IngestResponse
 
@@ -17,28 +17,39 @@ router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
 @router.post("", response_model=IngestResponse)
-async def ingest(payload: IngestRequest) -> IngestResponse:
+async def ingest(
+    payload: IngestRequest,
+    db: AsyncSession = Depends(get_db),
+) -> IngestResponse:
     """
     Parse free-form text into structured asset + snapshot data.
 
     The request body is a single `text` field — anything from a sentence like
     "My Vanguard ETF is worth €12,578 as of February 2026" to a pasted CSV.
 
-    The LangGraph pipeline (parse → validate) runs and the full state is
-    returned.  `is_valid: true` means everything parsed cleanly and is ready
-    to be applied via the upsert endpoint.
+    Existing portfolio assets are injected into the LLM prompt so the model
+    can match the user's intent to an already-known asset (e.g. "ETF" →
+    "Global Equity ETF") instead of creating duplicates.  When the match is
+    ambiguous, `ambiguous_assets` in the response lists the candidates for
+    the user to resolve in the UI before confirming.
+
+    `is_valid: true` means everything parsed cleanly and is ready to be
+    applied via POST /ingest/apply.
     """
     try:
-        # ainvoke() runs the graph asynchronously from START to END.
-        # We pass the initial state as a dict — only the keys that exist at
-        # the start need to be provided; the rest default to empty lists.
-        final_state = await ingest_graph.ainvoke({
+        graph = build_context_ingest_graph(db)
+        final_state = await graph.ainvoke({
             "raw_text": payload.text,
             "parsed_assets": [],
             "parsed_snapshots": [],
             "validated_assets": [],
             "validated_snapshots": [],
             "validation_errors": [],
+            "ambiguous_assets": [],
+            "resolved_names": {},
+            "applied_assets": [],
+            "applied_snapshots": [],
+            "apply_errors": [],
         })
     except Exception as exc:
         raise HTTPException(
@@ -53,6 +64,7 @@ async def ingest(payload: IngestRequest) -> IngestResponse:
         validated_snapshots=final_state["validated_snapshots"],
         validation_errors=final_state["validation_errors"],
         is_valid=len(final_state["validation_errors"]) == 0,
+        ambiguous_assets=final_state.get("ambiguous_assets", []),
     )
 
 
@@ -78,6 +90,8 @@ async def apply_ingest(
             "validated_assets": payload.validated_assets,
             "validated_snapshots": payload.validated_snapshots,
             "validation_errors": [],
+            "ambiguous_assets": [],
+            "resolved_names": payload.resolved_names,
             "applied_assets": [],
             "applied_snapshots": [],
             "apply_errors": [],

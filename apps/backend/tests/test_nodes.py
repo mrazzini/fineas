@@ -161,3 +161,34 @@ async def test_validate_empty_input():
     assert result["validated_assets"] == []
     assert result["validated_snapshots"] == []
     assert result["validation_errors"] == []
+
+
+# ── Disambiguation detection ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_validate_extracts_ambiguous_assets():
+    """Assets with match_candidates are surfaced in ambiguous_assets."""
+    state = _make_state(assets=[{
+        "name": "ETF",
+        "asset_type": "STOCKS",
+        "match_candidates": ["Global Equity ETF", "Vanguard ETF"],
+    }])
+    result = await validate(state)
+    assert len(result["ambiguous_assets"]) == 1
+    amb = result["ambiguous_assets"][0]
+    assert amb["original_name"] == "ETF"
+    assert "Global Equity ETF" in amb["candidates"]
+    assert "Vanguard ETF" in amb["candidates"]
+    # match_candidates must be stripped from validated_assets
+    assert "match_candidates" not in result["validated_assets"][0]
+    # The asset still appears in validated_assets using the LLM's best-guess name
+    assert result["validated_assets"][0]["name"] == "ETF"
+
+
+@pytest.mark.asyncio
+async def test_validate_non_ambiguous_asset_produces_empty_ambiguous():
+    """Normal assets (no match_candidates) produce empty ambiguous_assets."""
+    state = _make_state(assets=[{"name": "My ETF", "asset_type": "STOCKS"}])
+    result = await validate(state)
+    assert result["ambiguous_assets"] == []
+    assert result["validated_assets"] == [{"name": "My ETF", "asset_type": "STOCKS"}]

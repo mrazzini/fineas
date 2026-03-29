@@ -111,6 +111,20 @@ async def test_ingest_empty_text_returns_empty_lists(client):
 
 
 @pytest.mark.asyncio
+async def test_ingest_response_includes_ambiguous_assets_key(client):
+    """Response always includes ambiguous_assets (may be empty for clean inputs)."""
+    mock_llm = _make_llm_mock(_etf_response())
+    with patch("agent.nodes.get_llm", return_value=mock_llm):
+        resp = await client.post("/ingest", json={"text": "My Vanguard ETF is worth 12k"})
+
+    body = resp.json()
+    assert "ambiguous_assets" in body
+    assert isinstance(body["ambiguous_assets"], list)
+    # Clean, unambiguous input → no disambiguation needed
+    assert body["ambiguous_assets"] == []
+
+
+@pytest.mark.asyncio
 async def test_ingest_multiple_assets_and_snapshots(client):
     """Multiple assets and snapshots in one request all pass through."""
     multi = ParsedPortfolioUpdate(
