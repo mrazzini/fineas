@@ -33,7 +33,7 @@ def get_llm():
     if provider == "openrouter":
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
-            model=model or "anthropic/claude-3.5-sonnet",
+            model=model or "openrouter/auto",
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY"),
         )
