@@ -10,12 +10,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import config
 from database import engine
-from routers import assets, ingest, portfolio, snapshots
+from routers import assets, auth, data_load, ingest, portfolio, snapshots
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    config.assert_auth_configured()
     yield
     await engine.dispose()
 
@@ -36,10 +38,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(assets.router)
 app.include_router(snapshots.router)
 app.include_router(portfolio.router)
 app.include_router(ingest.router)
+app.include_router(data_load.router)
 
 
 @app.get("/health")

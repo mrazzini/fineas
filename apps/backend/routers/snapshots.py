@@ -1,10 +1,13 @@
 """
 CRUD endpoints for AssetSnapshot, nested under /assets/{asset_id}.
 
+Reads inherit the caller's owner scope via the parent asset lookup. Writes
+require auth and only touch the 'real' owner's assets.
+
 Route summary:
-  POST  /assets/{id}/snapshots         -> 201 SnapshotRead | 404 | 409
+  POST  /assets/{id}/snapshots         -> 201 SnapshotRead | 404 | 409 (auth)
   GET   /assets/{id}/snapshots         -> 200 list[SnapshotRead] | 404
-  POST  /assets/{id}/snapshots/upsert  -> 200 SnapshotRead | 404
+  POST  /assets/{id}/snapshots/upsert  -> 200 SnapshotRead | 404            (auth)
 """
 import uuid
 
@@ -14,9 +17,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import require_owner
 from database import get_db
 from models import AssetSnapshot
-from routers.deps import get_asset_or_404
+from routers.deps import get_asset_or_404, get_owner_scope
 from schemas import SnapshotCreate, SnapshotRead
 
 router = APIRouter(prefix="/assets/{asset_id}/snapshots", tags=["snapshots"])
@@ -27,9 +31,10 @@ async def create_snapshot(
     asset_id: uuid.UUID,
     payload: SnapshotCreate,
     db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_owner),
 ):
-    await get_asset_or_404(asset_id, db)
-    snapshot = AssetSnapshot(asset_id=asset_id, **payload.model_dump())
+    await get_asset_or_404(asset_id, db, scope="real")
+    snapshot = AssetSnapshot(asset_id=asset_id, owner="real", **payload.model_dump())
     db.add(snapshot)
     try:
         await db.commit()
@@ -47,8 +52,9 @@ async def create_snapshot(
 async def list_snapshots(
     asset_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    scope: str = Depends(get_owner_scope),
 ):
-    await get_asset_or_404(asset_id, db)
+    await get_asset_or_404(asset_id, db, scope=scope)
     result = await db.execute(
         select(AssetSnapshot)
         .where(AssetSnapshot.asset_id == asset_id)
@@ -62,23 +68,16 @@ async def upsert_snapshot(
     asset_id: uuid.UUID,
     payload: SnapshotCreate,
     db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_owner),
 ):
-    """
-    Insert or update a snapshot for the given asset + date.
-
-    Uses PostgreSQL's `ON CONFLICT ... DO UPDATE` so calling this endpoint
-    twice with the same (asset_id, snapshot_date) updates the balance rather
-    than returning 409.  Always returns 200 — upsert is idempotent by design.
-
-    This is the "apply" primitive that the Phase 4 HITL agent will call after
-    the user approves the parsed ingestion result.
-    """
-    await get_asset_or_404(asset_id, db)
+    """Insert or update a snapshot for the given asset + date. Auth required."""
+    await get_asset_or_404(asset_id, db, scope="real")
 
     stmt = (
         pg_insert(AssetSnapshot)
         .values(
             asset_id=asset_id,
+            owner="real",
             snapshot_date=payload.snapshot_date,
             balance=payload.balance,
         )

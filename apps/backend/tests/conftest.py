@@ -15,11 +15,25 @@ Why not transaction rollback?
   connection across fixtures and ASGI handlers triggers RuntimeError.
   Per-request sessions with table cleanup avoids this entirely.
 """
+import os
+
+# Test auth secrets — generated BEFORE importing config / auth so their
+# module-level reads pick up the values.
+TEST_PASSWORD = "test-password"
+os.environ.setdefault("FINEAS_SESSION_SECRET", "test-session-secret-not-for-production")
+
+if "FINEAS_OWNER_PASSWORD_HASH" not in os.environ:
+    from passlib.context import CryptContext as _CryptContext
+    os.environ["FINEAS_OWNER_PASSWORD_HASH"] = _CryptContext(
+        schemes=["bcrypt"]
+    ).hash(TEST_PASSWORD)
+
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+import config  # noqa: F401 — trigger env read
 from database import get_db
 from main import app
 from models import Base
@@ -40,8 +54,8 @@ async def test_engine():
 
 
 @pytest_asyncio.fixture(loop_scope="session")
-async def client(test_engine):
-    """httpx.AsyncClient with the FastAPI app and test DB injected."""
+async def anon_client(test_engine):
+    """Anonymous httpx.AsyncClient — no session cookie."""
     TestingSession = async_sessionmaker(
         bind=test_engine, class_=AsyncSession, expire_on_commit=False,
     )
@@ -59,3 +73,17 @@ async def client(test_engine):
     async with test_engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             await conn.execute(table.delete())
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def client(anon_client):
+    """Default client is authenticated as the owner.
+
+    Most existing tests exercise write endpoints; after the auth layer was
+    added those all require a valid session cookie. Logging in once at the
+    top of the fixture keeps the existing test suite working while making
+    the auth layer itself exercisable via `anon_client`.
+    """
+    res = await anon_client.post("/auth/login", json={"password": TEST_PASSWORD})
+    assert res.status_code == 200, f"test login failed: {res.text}"
+    yield anon_client

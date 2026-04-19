@@ -274,9 +274,10 @@ def make_apply_node(db: AsyncSession) -> Callable:
             # Apply any user-supplied disambiguation: "ETF" → "Global Equity ETF"
             name = state.get("resolved_names", {}).get(name, name)
             try:
-                # Check if asset already exists
+                # Check if asset already exists within the real-owner scope.
+                # The apply endpoint is auth-gated, so writes are always 'real'.
                 result = await db.execute(
-                    select(Asset).where(Asset.name == name)
+                    select(Asset).where(Asset.name == name, Asset.owner == "real")
                 )
                 existing = result.scalar_one_or_none()
 
@@ -300,6 +301,7 @@ def make_apply_node(db: AsyncSession) -> Callable:
 
                     new_asset = Asset(
                         name=name,
+                        owner="real",
                         asset_type=asset_type,
                         ticker=asset_data.get("ticker"),
                         annualized_return_pct=asset_data.get("annualized_return_pct"),
@@ -336,6 +338,7 @@ def make_apply_node(db: AsyncSession) -> Callable:
 
                 stmt = pg_insert(AssetSnapshot).values(
                     asset_id=asset_id,
+                    owner="real",
                     snapshot_date=snap_date,
                     balance=snap_data["balance"],
                 )

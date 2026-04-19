@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent import build_apply_graph, build_context_ingest_graph
+from auth import require_owner
 from database import get_db
 from schemas import ApplyRequest, ApplyResponse, IngestRequest, IngestResponse
 
@@ -72,6 +73,7 @@ async def ingest(
 async def apply_ingest(
     payload: ApplyRequest,
     db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_owner),
 ) -> ApplyResponse:
     """
     Write human-approved validated data to the database.

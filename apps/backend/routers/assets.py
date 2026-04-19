@@ -2,12 +2,16 @@
 """
 CRUD endpoints for the Asset resource.
 
+Reads are filtered by owner scope ('demo' for anonymous callers, 'real' for
+the authenticated owner). All writes require a valid session and land under
+owner='real'.
+
 Route summary:
-  POST   /assets            → 201 AssetRead
-  GET    /assets            → 200 list[AssetRead]
-  GET    /assets/{id}       → 200 AssetRead  | 404
-  PATCH  /assets/{id}       → 200 AssetRead  | 404
-  DELETE /assets/{id}       → 204            | 404
+  POST   /assets            -> 201 AssetRead        (auth required)
+  GET    /assets            -> 200 list[AssetRead]
+  GET    /assets/{id}       -> 200 AssetRead  | 404
+  PATCH  /assets/{id}       -> 200 AssetRead  | 404 (auth required)
+  DELETE /assets/{id}       -> 204            | 404 (auth required)
 """
 import uuid
 
@@ -16,17 +20,22 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import require_owner
 from database import get_db
 from models import Asset
-from routers.deps import get_asset_or_404
+from routers.deps import get_asset_or_404, get_owner_scope
 from schemas import AssetCreate, AssetRead, AssetUpdate
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 
 @router.post("", response_model=AssetRead, status_code=status.HTTP_201_CREATED)
-async def create_asset(payload: AssetCreate, db: AsyncSession = Depends(get_db)):
-    asset = Asset(**payload.model_dump())
+async def create_asset(
+    payload: AssetCreate,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_owner),
+):
+    asset = Asset(owner="real", **payload.model_dump())
     db.add(asset)
     try:
         await db.commit()
@@ -41,8 +50,12 @@ async def create_asset(payload: AssetCreate, db: AsyncSession = Depends(get_db))
 
 
 @router.get("", response_model=list[AssetRead])
-async def list_assets(include_archived: bool = False, db: AsyncSession = Depends(get_db)):
-    q = select(Asset).order_by(Asset.created_at)
+async def list_assets(
+    include_archived: bool = False,
+    db: AsyncSession = Depends(get_db),
+    scope: str = Depends(get_owner_scope),
+):
+    q = select(Asset).where(Asset.owner == scope).order_by(Asset.created_at)
     if not include_archived:
         q = q.where(Asset.is_archived == False)  # noqa: E712
     result = await db.execute(q)
@@ -50,15 +63,22 @@ async def list_assets(include_archived: bool = False, db: AsyncSession = Depends
 
 
 @router.get("/{asset_id}", response_model=AssetRead)
-async def get_asset(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    return await get_asset_or_404(asset_id, db)
+async def get_asset(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: str = Depends(get_owner_scope),
+):
+    return await get_asset_or_404(asset_id, db, scope=scope)
 
 
 @router.patch("/{asset_id}", response_model=AssetRead)
 async def update_asset(
-    asset_id: uuid.UUID, payload: AssetUpdate, db: AsyncSession = Depends(get_db)
+    asset_id: uuid.UUID,
+    payload: AssetUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_owner),
 ):
-    asset = await get_asset_or_404(asset_id, db)
+    asset = await get_asset_or_404(asset_id, db, scope="real")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(asset, field, value)
     await db.commit()
@@ -67,7 +87,11 @@ async def update_asset(
 
 
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_asset(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    asset = await get_asset_or_404(asset_id, db)
+async def delete_asset(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(require_owner),
+):
+    asset = await get_asset_or_404(asset_id, db, scope="real")
     await db.delete(asset)
     await db.commit()

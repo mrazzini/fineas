@@ -16,6 +16,7 @@ const BASE = "/api";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...init?.headers,
@@ -26,6 +27,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${res.status}: ${body}`);
   }
   if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+export const login = (password: string) =>
+  request<{ ok: boolean }>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+
+export const logout = () =>
+  request<void>("/auth/logout", { method: "POST" });
+
+export const getAuthStatus = () =>
+  request<{ authenticated: boolean }>("/auth/status");
+
+// ---------------------------------------------------------------------------
+// Real-data loader (auth required)
+// ---------------------------------------------------------------------------
+export interface LoadSummary {
+  assets_loaded: number;
+  snapshots_loaded: number;
+  skipped: string[];
+}
+
+export async function loadRealData(
+  assetsFile: File,
+  snapshotsFile: File,
+): Promise<LoadSummary> {
+  const form = new FormData();
+  form.append("assets", assetsFile);
+  form.append("snapshots", snapshotsFile);
+  const res = await fetch(`${BASE}/data/load`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`${res.status}: ${body}`);
+  }
   return res.json();
 }
 

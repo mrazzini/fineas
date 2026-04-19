@@ -18,3 +18,7 @@ langchain-openai>=0.2.0      # ChatOpenAI — used for OpenRouter + Groq (OpenAI
 
 # Environment config
 python-dotenv==1.0.1
+
+# Auth — bcrypt password hashing + signed session cookies
+passlib[bcrypt]==1.7.4
+itsdangerous==2.2.0

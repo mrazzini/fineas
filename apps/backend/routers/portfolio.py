@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models import Asset, AssetSnapshot
 from projection import AssetInput, project_portfolio
+from routers.deps import get_owner_scope
 from schemas import ProjectionResponse
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -39,10 +40,14 @@ async def get_projection(
     annual_expenses: Optional[Decimal] = None,
     safe_withdrawal_rate: float = 0.04,
     db: AsyncSession = Depends(get_db),
+    scope: str = Depends(get_owner_scope),
 ):
-    # 1. Load all non-archived assets
+    # 1. Load all non-archived assets within the caller's owner scope
     result = await db.execute(
-        select(Asset).where(Asset.is_archived == False).order_by(Asset.created_at)  # noqa: E712
+        select(Asset)
+        .where(Asset.owner == scope)
+        .where(Asset.is_archived == False)  # noqa: E712
+        .order_by(Asset.created_at)
     )
     assets = result.scalars().all()
 

@@ -35,10 +35,19 @@ class Asset(Base):
     """
     __tablename__ = "assets"
 
+    __table_args__ = (
+        UniqueConstraint("owner", "name", name="uq_asset_owner_name"),
+    )
+
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    # Discriminator separating the seeded 'demo' portfolio (visible to
+    # unauthenticated visitors) from the authenticated owner's 'real' data.
+    owner: Mapped[str] = mapped_column(
+        String(10), nullable=False, server_default="demo", default="demo", index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     asset_type: Mapped[AssetType] = mapped_column(
         Enum(AssetType, name="asset_type_enum"), nullable=False
     )
@@ -83,6 +92,10 @@ class AssetSnapshot(Base):
     )
     asset_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False
+    )
+    # Mirrored from the parent Asset so snapshot queries can filter without a join.
+    owner: Mapped[str] = mapped_column(
+        String(10), nullable=False, server_default="demo", default="demo", index=True
     )
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     # Exact decimal — never use Float for monetary values.

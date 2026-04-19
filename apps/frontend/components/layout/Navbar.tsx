@@ -8,6 +8,7 @@ const links = [
   { href: "/assets", label: "Assets" },
   { href: "/fire-calculator", label: "FIRE Calculator" },
   { href: "/import", label: "Smart Import" },
+  { href: "/login", label: "Owner Login" },
 ];
 
 export function Navbar() {
