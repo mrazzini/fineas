@@ -17,16 +17,10 @@ Why not transaction rollback?
 """
 import os
 
-# Test auth secrets — generated BEFORE importing config / auth so their
-# module-level reads pick up the values.
+# Test auth secrets — must be set BEFORE importing config / auth.
 TEST_PASSWORD = "test-password"
 os.environ.setdefault("FINEAS_SESSION_SECRET", "test-session-secret-not-for-production")
-
-if "FINEAS_OWNER_PASSWORD_HASH" not in os.environ:
-    from passlib.context import CryptContext as _CryptContext
-    os.environ["FINEAS_OWNER_PASSWORD_HASH"] = _CryptContext(
-        schemes=["bcrypt"]
-    ).hash(TEST_PASSWORD)
+os.environ.setdefault("FINEAS_OWNER_PASSWORD", TEST_PASSWORD)
 
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport

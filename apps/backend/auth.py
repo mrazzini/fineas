@@ -4,13 +4,12 @@ Single-owner model: one bcrypt hash in the environment. Successful login
 issues a timestamp-signed token carried in an HttpOnly cookie; the
 dependencies below check that token on subsequent requests.
 """
+import hmac
+
 from fastapi import HTTPException, Request, status
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
-from passlib.context import CryptContext
 
 import config
-
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Token payload is just a constant — it proves the signer knew the secret,
 # which is all we need for a single-owner app.
@@ -28,14 +27,10 @@ def _signer() -> TimestampSigner:
 
 
 def verify_password(plain: str) -> bool:
-    """Constant-time verify against the configured bcrypt hash."""
-    if not config.OWNER_PASSWORD_HASH:
+    """Constant-time compare against the configured plaintext password."""
+    if not config.OWNER_PASSWORD:
         return False
-    try:
-        return _pwd_context.verify(plain, config.OWNER_PASSWORD_HASH)
-    except ValueError:
-        # Malformed hash in env — treat as failed login rather than 500.
-        return False
+    return hmac.compare_digest(plain.encode("utf-8"), config.OWNER_PASSWORD.encode("utf-8"))
 
 
 def create_session_token() -> str:
