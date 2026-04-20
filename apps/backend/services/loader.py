@@ -20,7 +20,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import Asset, AssetSnapshot, AssetType
 
 
-ASSET_TYPE_MAP = {t.value: t for t in AssetType}
+# Case/punctuation-insensitive lookup: the CSV decides the asset type labels,
+# the loader maps them to the canonical enum. Keys are normalized via _norm().
+_ASSET_TYPE_ALIASES = {
+    "cash": AssetType.CASH,
+    "stocks": AssetType.STOCKS,
+    "stock": AssetType.STOCKS,
+    "equities": AssetType.STOCKS,
+    "equity": AssetType.STOCKS,
+    "bonds": AssetType.BONDS,
+    "bond": AssetType.BONDS,
+    "realestate": AssetType.REAL_ESTATE,
+    "real_estate": AssetType.REAL_ESTATE,
+    "crypto": AssetType.CRYPTO,
+    "cryptocurrency": AssetType.CRYPTO,
+    "pensionfund": AssetType.PENSION_FUND,
+    "pension_fund": AssetType.PENSION_FUND,
+    "pension": AssetType.PENSION_FUND,
+    "retirement": AssetType.PENSION_FUND,
+    "retirementfund": AssetType.PENSION_FUND,
+    "p2plending": AssetType.OTHER,
+    "p2p": AssetType.OTHER,
+    "other": AssetType.OTHER,
+}
+
+
+def _norm(s: str) -> str:
+    return "".join(c for c in s.lower() if c.isalnum() or c == "_")
+
+
+def _resolve_asset_type(raw: str) -> AssetType:
+    key = _norm(raw)
+    if key in _ASSET_TYPE_ALIASES:
+        return _ASSET_TYPE_ALIASES[key]
+    raise ValueError(f"unknown asset_type {raw!r}")
 
 
 @dataclass
@@ -37,7 +70,7 @@ def _parse_assets_rows(rows: Iterable[dict]) -> list[dict]:
     for i, row in enumerate(rows, start=1):
         try:
             name = row["name"].strip()
-            asset_type = ASSET_TYPE_MAP[row["asset_type"].strip()]
+            asset_type = _resolve_asset_type(row["asset_type"])
             ret = row.get("annualized_return_pct", "").strip()
             parsed.append({
                 "name": name,

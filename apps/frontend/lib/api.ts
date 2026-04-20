@@ -1,6 +1,7 @@
 import type {
   Asset,
   AssetCreate,
+  AssetType,
   AssetUpdate,
   Snapshot,
   SnapshotCreate,
@@ -54,24 +55,29 @@ export interface LoadSummary {
   skipped: string[];
 }
 
-export async function loadRealData(
-  assetsFile: File,
-  snapshotsFile: File,
-): Promise<LoadSummary> {
-  const form = new FormData();
-  form.append("assets", assetsFile);
-  form.append("snapshots", snapshotsFile);
-  const res = await fetch(`${BASE}/data/load`, {
-    method: "POST",
-    credentials: "include",
-    body: form,
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`${res.status}: ${body}`);
-  }
-  return res.json();
+export interface LoadAssetEntry {
+  original_name: string;
+  name: string;
+  asset_type: AssetType;
+  annualized_return_pct: string | null;
 }
+
+export interface LoadSnapshotEntry {
+  asset_name: string;
+  snapshot_date: string;
+  balance: string;
+}
+
+export interface LoadPayload {
+  assets: LoadAssetEntry[];
+  snapshots: LoadSnapshotEntry[];
+}
+
+export const loadRealData = (payload: LoadPayload) =>
+  request<LoadSummary>("/data/load", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 
 // ---------------------------------------------------------------------------
 // Health
