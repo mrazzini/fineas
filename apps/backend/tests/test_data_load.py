@@ -1,4 +1,4 @@
-"""/data/load endpoint — JSON payload (UI-mapped), auth-gated, owner='real'."""
+"""/data/load endpoint — JSON payload (UI-mapped), auth-gated."""
 import pytest
 
 ASSETS_PAYLOAD = [
@@ -87,3 +87,44 @@ async def test_load_rewrites_asset_name_when_renamed(client):
     assert res.json()["skipped"] == []
     assets_list = (await client.get("/assets")).json()
     assert {a["name"] for a in assets_list} == {"isyBank Liquidity"}
+
+
+@pytest.mark.asyncio
+async def test_snapshot_name_map_reroutes(client):
+    """User-supplied snapshot_name_map routes mismatched refs to an existing asset."""
+    snapshots = [
+        {"asset_name": "FTSE World", "snapshot_date": "15/01/2026", "balance": "999.00"}
+    ]
+    res = await client.post(
+        "/data/load",
+        json={
+            "assets": ASSETS_PAYLOAD,
+            "snapshots": snapshots,
+            "snapshot_name_map": {"FTSE World": "RealStocks"},
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["snapshots_loaded"] == 1
+    assert res.json()["skipped"] == []
+
+
+@pytest.mark.asyncio
+async def test_snapshot_name_map_skip_sentinel(client):
+    """__SKIP__ sentinel drops snapshots with no complaint."""
+    snapshots = [
+        {"asset_name": "Noisy", "snapshot_date": "15/01/2026", "balance": "1.00"},
+        {"asset_name": "Noisy", "snapshot_date": "16/01/2026", "balance": "2.00"},
+    ]
+    res = await client.post(
+        "/data/load",
+        json={
+            "assets": ASSETS_PAYLOAD,
+            "snapshots": snapshots,
+            "snapshot_name_map": {"Noisy": "__SKIP__"},
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["snapshots_loaded"] == 0
+    # Both snapshots appear in skipped, tagged as user-skipped
+    assert len(body["skipped"]) == 2

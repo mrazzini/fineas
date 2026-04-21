@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getProjection } from "@/lib/api";
+import { useAssets, useLatestBalances, useProjection } from "@/lib/hooks";
 import { ParameterPanel } from "@/components/fire/ParameterPanel";
 import { ResultCards } from "@/components/fire/ResultCards";
 import { ProjectionScenarioChart } from "@/components/fire/ProjectionScenarioChart";
@@ -20,43 +19,44 @@ export default function FireCalculatorPage() {
 
   const fireTarget = queryParams.expenses / queryParams.withdrawalRate;
 
-  // Three scenarios — same contribution/expenses, but the backend uses per-asset rates
-  // We run the same query (balanced) since rates come from DB. For visual demo,
-  // we show the balanced scenario and could extend with rate overrides later.
-  const { data: balanced } = useQuery({
-    queryKey: ["fire-balanced", queryParams],
-    queryFn: () =>
-      getProjection({
-        months: 300,
-        monthly_contribution: queryParams.contribution,
-        annual_expenses: queryParams.expenses,
-        safe_withdrawal_rate: queryParams.withdrawalRate,
-      }),
-  });
+  const { data: assets = [] } = useAssets();
+  const { data: latestBalances = {} } = useLatestBalances(assets);
 
-  // Conservative: higher SWR = lower target, easier to reach
-  const { data: conservative } = useQuery({
-    queryKey: ["fire-conservative", queryParams],
-    queryFn: () =>
-      getProjection({
-        months: 300,
-        monthly_contribution: queryParams.contribution,
-        annual_expenses: queryParams.expenses,
-        safe_withdrawal_rate: Math.min(queryParams.withdrawalRate + 0.01, 0.06),
-      }),
-  });
+  const { data: balanced } = useProjection(
+    assets,
+    latestBalances,
+    {
+      months: 300,
+      monthly_contribution: queryParams.contribution,
+      annual_expenses: queryParams.expenses,
+      safe_withdrawal_rate: queryParams.withdrawalRate,
+    },
+    "balanced",
+  );
 
-  // Aggressive: lower SWR = higher target, harder to reach
-  const { data: aggressive } = useQuery({
-    queryKey: ["fire-aggressive", queryParams],
-    queryFn: () =>
-      getProjection({
-        months: 300,
-        monthly_contribution: queryParams.contribution,
-        annual_expenses: queryParams.expenses,
-        safe_withdrawal_rate: Math.max(queryParams.withdrawalRate - 0.01, 0.02),
-      }),
-  });
+  const { data: conservative } = useProjection(
+    assets,
+    latestBalances,
+    {
+      months: 300,
+      monthly_contribution: queryParams.contribution,
+      annual_expenses: queryParams.expenses,
+      safe_withdrawal_rate: Math.min(queryParams.withdrawalRate + 0.01, 0.06),
+    },
+    "conservative",
+  );
+
+  const { data: aggressive } = useProjection(
+    assets,
+    latestBalances,
+    {
+      months: 300,
+      monthly_contribution: queryParams.contribution,
+      annual_expenses: queryParams.expenses,
+      safe_withdrawal_rate: Math.max(queryParams.withdrawalRate - 0.01, 0.02),
+    },
+    "aggressive",
+  );
 
   const handleRecalculate = () => {
     setQueryParams({

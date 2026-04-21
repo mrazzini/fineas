@@ -103,9 +103,20 @@ class ProjectionResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ExistingAssetHint(BaseModel):
+    """Optional context passed by the caller so the LLM can dedupe against
+    assets it already knows about. Anonymous callers send demo-fixture names;
+    the authed owner sends their real asset list."""
+    name: str
+    asset_type: Optional[str] = None
+    ticker: Optional[str] = None
+    latest_balance: Optional[float] = None
+
+
 class IngestRequest(BaseModel):
     """Free-form text or pasted CSV to parse into structured portfolio data."""
     text: str
+    existing_assets: list[ExistingAssetHint] = []
 
 
 class IngestResponse(BaseModel):

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuthStatus } from "@/lib/hooks";
 
 const links = [
   { href: "/", label: "Dashboard" },
@@ -13,6 +14,8 @@ const links = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const { data: auth } = useAuthStatus();
+  const isOwner = auth?.authenticated ?? false;
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-40 h-14 bg-surface-container/80 backdrop-blur-xl border-b border-outline-variant/15">
@@ -23,6 +26,20 @@ export function Navbar() {
           </div>
           <span className="font-headline font-bold text-on-surface text-lg tracking-tight">
             Fineas
+          </span>
+          <span
+            className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-label tracking-wider uppercase ${
+              isOwner
+                ? "bg-primary/15 text-primary"
+                : "bg-tertiary-container/40 text-tertiary"
+            }`}
+            title={
+              isOwner
+                ? "Viewing real owner data"
+                : "Viewing demo fixtures — log in to see real data"
+            }
+          >
+            {isOwner ? "Live" : "Demo"}
           </span>
         </Link>
 

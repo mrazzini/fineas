@@ -15,7 +15,7 @@ from datetime import date, datetime
 from typing import Callable
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,80 +73,32 @@ async def parse(state: IngestState) -> dict:
     }
 
 
-async def _fetch_existing_assets(db: AsyncSession) -> list[ExistingAsset]:
+async def parse_with_context(state: IngestState) -> dict:
+    """[Node — LLM] Parse raw text, using caller-supplied existing_assets
+    as dedup context. No DB read — stateless.
     """
-    Return all non-archived assets with their most recent balance in one query.
-
-    Uses ROW_NUMBER() over (PARTITION BY asset_id ORDER BY snapshot_date DESC)
-    to get the latest snapshot per asset without N+1 queries.
-    Assets with no snapshots get latest_balance=None.
-    """
-    ranked = (
-        select(
-            AssetSnapshot.asset_id,
-            AssetSnapshot.balance,
-            func.row_number()
-                .over(
-                    partition_by=AssetSnapshot.asset_id,
-                    order_by=AssetSnapshot.snapshot_date.desc(),
-                )
-                .label("rn"),
-        )
-        .subquery()
-    )
-    stmt = (
-        select(
-            Asset.name,
-            Asset.asset_type,
-            Asset.ticker,
-            ranked.c.balance.label("latest_balance"),
-        )
-        .where(Asset.is_archived == False)  # noqa: E712
-        .outerjoin(ranked, (Asset.id == ranked.c.asset_id) & (ranked.c.rn == 1))
-        .order_by(Asset.name)
-    )
-    rows = (await db.execute(stmt)).all()
-    return [
+    raw_existing = state.get("existing_assets") or []
+    existing = [
         ExistingAsset(
-            name=row.name,
-            asset_type=str(
-                row.asset_type.value
-                if hasattr(row.asset_type, "value")
-                else row.asset_type
-            ),
-            ticker=row.ticker,
-            latest_balance=float(row.latest_balance) if row.latest_balance is not None else None,
+            name=e.get("name", ""),
+            asset_type=e.get("asset_type"),
+            ticker=e.get("ticker"),
+            latest_balance=e.get("latest_balance"),
         )
-        for row in rows
+        for e in raw_existing
     ]
+    prompt = build_parse_prompt(existing) if existing else PARSE_SYSTEM_PROMPT
 
-
-def make_parse_node(db: AsyncSession) -> Callable:
-    """
-    Factory: returns a parse node that fetches existing portfolio assets from
-    the DB and injects them into the LLM prompt before extraction.
-
-    Used by `build_context_ingest_graph` in the production endpoint.
-    The bare `parse` function above is kept for the static `ingest_graph`
-    singleton (used by all mocked tests) — zero regressions.
-    """
-
-    async def parse_with_context(state: IngestState) -> dict:
-        existing_assets = await _fetch_existing_assets(db)
-        prompt = build_parse_prompt(existing_assets)
-
-        llm = get_llm()
-        structured_llm = llm.with_structured_output(ParsedPortfolioUpdate)
-        result: ParsedPortfolioUpdate = await structured_llm.ainvoke([
-            SystemMessage(content=prompt),
-            HumanMessage(content=state["raw_text"]),
-        ])
-        return {
-            "parsed_assets": [a.model_dump() for a in result.assets],
-            "parsed_snapshots": [s.model_dump() for s in result.snapshots],
-        }
-
-    return parse_with_context
+    llm = get_llm()
+    structured_llm = llm.with_structured_output(ParsedPortfolioUpdate)
+    result: ParsedPortfolioUpdate = await structured_llm.ainvoke([
+        SystemMessage(content=prompt),
+        HumanMessage(content=state["raw_text"]),
+    ])
+    return {
+        "parsed_assets": [a.model_dump() for a in result.assets],
+        "parsed_snapshots": [s.model_dump() for s in result.snapshots],
+    }
 
 
 def _normalise_asset_type(raw: str) -> str | None:
@@ -277,7 +229,7 @@ def make_apply_node(db: AsyncSession) -> Callable:
                 # Check if asset already exists within the real-owner scope.
                 # The apply endpoint is auth-gated, so writes are always 'real'.
                 result = await db.execute(
-                    select(Asset).where(Asset.name == name, Asset.owner == "real")
+                    select(Asset).where(Asset.name == name)
                 )
                 existing = result.scalar_one_or_none()
 
@@ -301,7 +253,6 @@ def make_apply_node(db: AsyncSession) -> Callable:
 
                     new_asset = Asset(
                         name=name,
-                        owner="real",
                         asset_type=asset_type,
                         ticker=asset_data.get("ticker"),
                         annualized_return_pct=asset_data.get("annualized_return_pct"),
@@ -338,7 +289,6 @@ def make_apply_node(db: AsyncSession) -> Callable:
 
                 stmt = pg_insert(AssetSnapshot).values(
                     asset_id=asset_id,
-                    owner="real",
                     snapshot_date=snap_date,
                     balance=snap_data["balance"],
                 )

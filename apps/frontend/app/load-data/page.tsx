@@ -35,6 +35,8 @@ export default function LoadDataPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [summary, setSummary] = useState<LoadSummary | null>(null);
+  // original snapshot asset_name -> chosen draft name or "__SKIP__"
+  const [snapshotNameMap, setSnapshotNameMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     getAuthStatus()
@@ -45,8 +47,14 @@ export default function LoadDataPage() {
       .catch(() => router.replace("/login"));
   }, [router]);
 
+  const snapshotCountsByRawName = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of snapshots) m.set(s.asset_name, (m.get(s.asset_name) ?? 0) + 1);
+    return m;
+  }, [snapshots]);
+
   const unmatched = useMemo(() => {
-    if (!drafts) return [];
+    if (!drafts) return [] as string[];
     const known = new Set(drafts.map((d) => d.original_name));
     const missing = new Set<string>();
     for (const s of snapshots) {
@@ -103,6 +111,7 @@ export default function LoadDataPage() {
 
       setDrafts(newDrafts);
       setSnapshots(snapshotEntries);
+      setSnapshotNameMap({});
       setSummary(null);
       setError("");
     } catch (err) {
@@ -135,7 +144,11 @@ export default function LoadDataPage() {
           annualized_return_pct: ret === "" ? null : ret,
         };
       });
-      const result = await loadRealData({ assets: payloadAssets, snapshots });
+      const result = await loadRealData({
+        assets: payloadAssets,
+        snapshots,
+        snapshot_name_map: snapshotNameMap,
+      });
       setSummary(result);
       queryClient.invalidateQueries();
     } catch (err) {
@@ -154,6 +167,7 @@ export default function LoadDataPage() {
   function reset() {
     setDrafts(null);
     setSnapshots([]);
+    setSnapshotNameMap({});
     setSummary(null);
     setError("");
   }
@@ -220,10 +234,51 @@ export default function LoadDataPage() {
           </div>
 
           {unmatched.length > 0 && (
-            <div className="text-sm bg-tertiary-container/20 border border-tertiary/30 rounded-lg px-3 py-2">
-              <strong>Snapshots reference unknown asset names:</strong>{" "}
-              {unmatched.join(", ")}. Rename an asset below to match, or these
-              snapshots will be skipped.
+            <div className="text-sm bg-tertiary-container/20 border border-tertiary/30 rounded-lg px-3 py-3 space-y-2">
+              <div>
+                <strong>Unresolved snapshot references:</strong> pick a target
+                asset or skip these rows.
+              </div>
+              <div className="space-y-1.5">
+                {unmatched.map((raw) => {
+                  const count = snapshotCountsByRawName.get(raw) ?? 0;
+                  const selected = snapshotNameMap[raw] ?? "";
+                  return (
+                    <div
+                      key={raw}
+                      className="flex items-center gap-2 flex-wrap"
+                    >
+                      <code className="px-1.5 py-0.5 bg-surface-container rounded text-xs">
+                        {raw}
+                      </code>
+                      <span className="text-xs text-on-surface-variant">
+                        ({count} snapshots)
+                      </span>
+                      <span className="text-xs text-on-surface-variant">→</span>
+                      <select
+                        value={selected}
+                        onChange={(e) =>
+                          setSnapshotNameMap((prev) => {
+                            const next = { ...prev };
+                            if (e.target.value === "") delete next[raw];
+                            else next[raw] = e.target.value;
+                            return next;
+                          })
+                        }
+                        className="bg-transparent px-2 py-1 text-xs rounded border border-outline-variant/30"
+                      >
+                        <option value="">Skip (default)</option>
+                        <option value="__SKIP__">Skip these snapshots</option>
+                        {drafts.map((d) => (
+                          <option key={d.original_name} value={d.original_name}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 

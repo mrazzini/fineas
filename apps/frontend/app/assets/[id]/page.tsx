@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { getAsset, getSnapshots } from "@/lib/api";
+import { useAsset, useIsOwner, useSnapshots } from "@/lib/hooks";
 import { AssetHeader } from "@/components/asset-detail/AssetHeader";
 import { BalanceChart } from "@/components/asset-detail/BalanceChart";
 import { SnapshotTable } from "@/components/asset-detail/SnapshotTable";
@@ -12,16 +11,10 @@ import { AddSnapshotModal } from "@/components/asset-detail/AddSnapshotModal";
 export default function AssetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [showModal, setShowModal] = useState(false);
+  const isOwner = useIsOwner();
 
-  const { data: asset } = useQuery({
-    queryKey: ["asset", id],
-    queryFn: () => getAsset(id),
-  });
-
-  const { data: snapshots = [] } = useQuery({
-    queryKey: ["snapshots", id],
-    queryFn: () => getSnapshots(id),
-  });
+  const { data: asset } = useAsset(id);
+  const { data: snapshots = [] } = useSnapshots(id);
 
   if (!asset) {
     return (
@@ -42,22 +35,26 @@ export default function AssetDetailPage() {
         firstSnapshot={firstSnapshot}
       />
 
-      <div className="flex justify-end">
-        <button
-          onClick={() => setShowModal(true)}
-          className="px-4 py-2 rounded-lg text-sm font-medium liquid-gradient text-on-primary"
-        >
-          + Add Snapshot
-        </button>
-      </div>
+      {isOwner && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => setShowModal(true)}
+            className="px-4 py-2 rounded-lg text-sm font-medium liquid-gradient text-on-primary"
+          >
+            + Add Snapshot
+          </button>
+        </div>
+      )}
 
       <BalanceChart snapshots={snapshots} />
       <SnapshotTable snapshots={snapshots} />
-      <AddSnapshotModal
-        open={showModal}
-        onClose={() => setShowModal(false)}
-        assetId={id}
-      />
+      {isOwner && (
+        <AddSnapshotModal
+          open={showModal}
+          onClose={() => setShowModal(false)}
+          assetId={id}
+        />
+      )}
     </div>
   );
 }

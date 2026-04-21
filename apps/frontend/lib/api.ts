@@ -6,6 +6,7 @@ import type {
   Snapshot,
   SnapshotCreate,
   ProjectionResponse,
+  ProjectionRequest,
   IngestRequest,
   IngestResponse,
   ApplyRequest,
@@ -71,6 +72,7 @@ export interface LoadSnapshotEntry {
 export interface LoadPayload {
   assets: LoadAssetEntry[];
   snapshots: LoadSnapshotEntry[];
+  snapshot_name_map?: Record<string, string>;
 }
 
 export const loadRealData = (payload: LoadPayload) =>
@@ -85,7 +87,7 @@ export const loadRealData = (payload: LoadPayload) =>
 export const getHealth = () => request<{ status: string }>("/health");
 
 // ---------------------------------------------------------------------------
-// Assets
+// Assets (auth required on the backend)
 // ---------------------------------------------------------------------------
 export const getAssets = (includeArchived = false) =>
   request<Asset[]>(`/assets?include_archived=${includeArchived}`);
@@ -105,7 +107,7 @@ export const deleteAsset = (id: string) =>
   request<void>(`/assets/${id}`, { method: "DELETE" });
 
 // ---------------------------------------------------------------------------
-// Snapshots
+// Snapshots (auth required on the backend)
 // ---------------------------------------------------------------------------
 export const getSnapshots = (assetId: string) =>
   request<Snapshot[]>(`/assets/${assetId}/snapshots`);
@@ -123,29 +125,16 @@ export const upsertSnapshot = (assetId: string, data: SnapshotCreate) =>
   });
 
 // ---------------------------------------------------------------------------
-// Portfolio / Projection
+// Projection (stateless, no auth) — caller supplies the assets inline
 // ---------------------------------------------------------------------------
-export const getProjection = (params?: {
-  months?: number;
-  monthly_contribution?: number;
-  annual_expenses?: number;
-  safe_withdrawal_rate?: number;
-}) => {
-  const searchParams = new URLSearchParams();
-  if (params?.months != null)
-    searchParams.set("months", String(params.months));
-  if (params?.monthly_contribution != null)
-    searchParams.set("monthly_contribution", String(params.monthly_contribution));
-  if (params?.annual_expenses != null)
-    searchParams.set("annual_expenses", String(params.annual_expenses));
-  if (params?.safe_withdrawal_rate != null)
-    searchParams.set("safe_withdrawal_rate", String(params.safe_withdrawal_rate));
-  const qs = searchParams.toString();
-  return request<ProjectionResponse>(`/portfolio/projection${qs ? `?${qs}` : ""}`);
-};
+export const computeProjection = (data: ProjectionRequest) =>
+  request<ProjectionResponse>("/projection/compute", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 
 // ---------------------------------------------------------------------------
-// Ingestion
+// Ingestion (parse is stateless + no auth; apply is auth-gated)
 // ---------------------------------------------------------------------------
 export const ingestText = (data: IngestRequest) =>
   request<IngestResponse>("/ingest", {

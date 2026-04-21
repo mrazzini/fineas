@@ -68,8 +68,31 @@ export interface ProjectionResponse {
   monthly: MonthlySlice[];
 }
 
+export interface ProjectionAssetIn {
+  asset_id: string;
+  name: string;
+  current_balance: string;
+  annualized_return_pct: string;
+}
+
+export interface ProjectionRequest {
+  assets: ProjectionAssetIn[];
+  months?: number;
+  monthly_contribution?: string | number;
+  annual_expenses?: string | number | null;
+  safe_withdrawal_rate?: number;
+}
+
+export interface ExistingAssetHint {
+  name: string;
+  asset_type?: string | null;
+  ticker?: string | null;
+  latest_balance?: number | null;
+}
+
 export interface IngestRequest {
   text: string;
+  existing_assets?: ExistingAssetHint[];
 }
 
 export interface AmbiguousAsset {

@@ -1,47 +1,22 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { getAssets, getSnapshots, getProjection } from "@/lib/api";
+import { useAssets, useLatestBalances, useProjection } from "@/lib/hooks";
 import { KpiRow } from "@/components/dashboard/KpiRow";
 import { ProjectionChart } from "@/components/dashboard/ProjectionChart";
 import { TopAssetsTable } from "@/components/dashboard/TopAssetsTable";
 import { AllocationDonut } from "@/components/dashboard/AllocationDonut";
-import type { Snapshot } from "@/lib/types";
 
 const MONTHLY_CONTRIBUTION = 1200;
 const ANNUAL_EXPENSES = 30000;
 const PROJECTION_MONTHS = 300;
 
 export default function DashboardPage() {
-  const { data: assets = [] } = useQuery({
-    queryKey: ["assets"],
-    queryFn: () => getAssets(),
-  });
-
-  const { data: projection } = useQuery({
-    queryKey: ["projection", MONTHLY_CONTRIBUTION, ANNUAL_EXPENSES],
-    queryFn: () =>
-      getProjection({
-        months: PROJECTION_MONTHS,
-        monthly_contribution: MONTHLY_CONTRIBUTION,
-        annual_expenses: ANNUAL_EXPENSES,
-      }),
-  });
-
-  // Fetch latest snapshot per asset for balance display
-  const { data: latestBalances = {} } = useQuery({
-    queryKey: ["latestBalances", assets.map((a) => a.id)],
-    enabled: assets.length > 0,
-    queryFn: async () => {
-      const entries = await Promise.all(
-        assets.map(async (a) => {
-          const snaps = await getSnapshots(a.id);
-          const latest = snaps.length > 0 ? snaps[snaps.length - 1] : null;
-          return [a.id, latest] as [string, Snapshot | null];
-        })
-      );
-      return Object.fromEntries(entries) as Record<string, Snapshot | null>;
-    },
+  const { data: assets = [] } = useAssets();
+  const { data: latestBalances = {} } = useLatestBalances(assets);
+  const { data: projection } = useProjection(assets, latestBalances, {
+    months: PROJECTION_MONTHS,
+    monthly_contribution: MONTHLY_CONTRIBUTION,
+    annual_expenses: ANNUAL_EXPENSES,
   });
 
   if (!projection) {

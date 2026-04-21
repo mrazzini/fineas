@@ -61,8 +61,3 @@ def require_owner(request: Request) -> bool:
             headers={"WWW-Authenticate": "Cookie"},
         )
     return True
-
-
-def owner_scope(is_authed: bool) -> str:
-    """Map auth state to the data-owner discriminator used in queries."""
-    return "real" if is_authed else "demo"

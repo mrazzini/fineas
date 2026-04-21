@@ -3,14 +3,18 @@
 import { useState, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ingestText, applyIngest } from "@/lib/api";
+import { useAssets, useIsOwner, useLatestBalances } from "@/lib/hooks";
 import { InputPanel } from "@/components/import/InputPanel";
 import { ParsedResults } from "@/components/import/ParsedResults";
 import { ConfirmBar } from "@/components/import/ConfirmBar";
-import type { IngestResponse } from "@/lib/types";
+import type { ExistingAssetHint, IngestResponse } from "@/lib/types";
 
 
 export default function ImportPage() {
   const queryClient = useQueryClient();
+  const isOwner = useIsOwner();
+  const { data: assets = [] } = useAssets();
+  const { data: latestBalances = {} } = useLatestBalances(assets);
   const [text, setText] = useState("");
   const [result, setResult] = useState<IngestResponse | null>(null);
   const [confirmError, setConfirmError] = useState("");
@@ -52,7 +56,17 @@ export default function ImportPage() {
 
   // ── Parse mutation ─────────────────────────────────────────────────────
   const parseMutation = useMutation({
-    mutationFn: () => ingestText({ text }),
+    mutationFn: () => {
+      const existing_assets: ExistingAssetHint[] = assets.map((a) => ({
+        name: a.name,
+        asset_type: a.asset_type,
+        ticker: a.ticker,
+        latest_balance: latestBalances[a.id]
+          ? parseFloat(latestBalances[a.id]!.balance)
+          : null,
+      }));
+      return ingestText({ text, existing_assets });
+    },
     onSuccess: (data) => {
       setResult(data);
       setConfirmError("");
@@ -109,6 +123,7 @@ export default function ImportPage() {
   };
 
   const hasSelection = selectedAssets.size > 0 || selectedSnapshots.size > 0;
+  const canConfirm = isOwner && result?.is_valid && hasSelection;
 
   return (
     <div className={`py-8 space-y-6 ${result ? "pb-24" : ""}`}>
@@ -119,6 +134,12 @@ export default function ImportPage() {
         <p className="text-sm text-on-surface-variant mt-1">
           Paste portfolio data and let AI parse it into structured records
         </p>
+        {!isOwner && (
+          <p className="text-xs text-on-surface-variant mt-2">
+            Parsing is open to everyone. Saving parsed results requires owner
+            login.
+          </p>
+        )}
       </div>
 
       <InputPanel
@@ -159,7 +180,7 @@ export default function ImportPage() {
           onDiscard={handleDiscard}
           onConfirm={handleConfirm}
           isConfirming={isConfirming}
-          disabled={!result.is_valid || !hasSelection}
+          disabled={!canConfirm}
         />
       )}
     </div>

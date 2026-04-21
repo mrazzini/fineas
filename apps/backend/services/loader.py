@@ -1,8 +1,8 @@
-"""Shared CSV loader for assets + snapshots.
+"""Shared bulk loader for assets + snapshots.
 
-Used by both the one-shot `scripts/seed.py` (owner='demo') and the HTTP
-`POST /data/load` endpoint (owner='real').  Idempotent: assets upsert on
-(owner, name), snapshots upsert on (asset_id, snapshot_date).
+Called by `POST /data/load` after the user has mapped raw CSV rows to
+canonical asset types on the frontend. Idempotent: assets upsert on
+name, snapshots upsert on (asset_id, snapshot_date).
 """
 from __future__ import annotations
 
@@ -20,8 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import Asset, AssetSnapshot, AssetType
 
 
-# Case/punctuation-insensitive lookup: the CSV decides the asset type labels,
-# the loader maps them to the canonical enum. Keys are normalized via _norm().
 _ASSET_TYPE_ALIASES = {
     "cash": AssetType.CASH,
     "stocks": AssetType.STOCKS,
@@ -110,9 +108,8 @@ async def load_portfolio(
     session: AsyncSession,
     assets_rows: list[dict],
     snapshots_rows: list[dict],
-    owner: str,
 ) -> LoadResult:
-    """Upsert assets and snapshots for the given owner in one transaction.
+    """Upsert assets and snapshots in one transaction.
 
     assets_rows: dicts with keys name, asset_type, annualized_return_pct.
     snapshots_rows: dicts with keys asset_name, snapshot_date (DD/MM/YYYY), balance.
@@ -124,9 +121,9 @@ async def load_portfolio(
     for asset in parsed_assets:
         stmt = (
             pg_insert(Asset)
-            .values(owner=owner, **asset)
+            .values(**asset)
             .on_conflict_do_update(
-                constraint="uq_asset_owner_name",
+                index_elements=["name"],
                 set_={
                     "asset_type": asset["asset_type"],
                     "annualized_return_pct": asset["annualized_return_pct"],
@@ -134,16 +131,10 @@ async def load_portfolio(
             )
         )
         res = await session.execute(stmt)
-        # rowcount is 1 for both insert and update with on_conflict_do_update;
-        # we differentiate by checking existence first would require a round-trip,
-        # so we lump both as "inserted" for the seed use-case. The endpoint
-        # reports a total count rather than insert-vs-update breakdown.
         if res.rowcount:
             result.assets_inserted += 1
 
-    id_result = await session.execute(
-        select(Asset.id, Asset.name).where(Asset.owner == owner)
-    )
+    id_result = await session.execute(select(Asset.id, Asset.name))
     asset_ids = {name: uid for uid, name in id_result.all()}
 
     for snap in parsed_snapshots:
@@ -157,7 +148,6 @@ async def load_portfolio(
             pg_insert(AssetSnapshot)
             .values(
                 asset_id=asset_id,
-                owner=owner,
                 snapshot_date=snap["snapshot_date"],
                 balance=snap["balance"],
             )

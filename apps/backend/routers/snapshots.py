@@ -1,13 +1,13 @@
 """
 CRUD endpoints for AssetSnapshot, nested under /assets/{asset_id}.
 
-Reads inherit the caller's owner scope via the parent asset lookup. Writes
-require auth and only touch the 'real' owner's assets.
+All endpoints require authentication — public visitors use the demo fixture
+served by the frontend.
 
 Route summary:
-  POST  /assets/{id}/snapshots         -> 201 SnapshotRead | 404 | 409 (auth)
+  POST  /assets/{id}/snapshots         -> 201 SnapshotRead | 404 | 409
   GET   /assets/{id}/snapshots         -> 200 list[SnapshotRead] | 404
-  POST  /assets/{id}/snapshots/upsert  -> 200 SnapshotRead | 404            (auth)
+  POST  /assets/{id}/snapshots/upsert  -> 200 SnapshotRead | 404
 """
 import uuid
 
@@ -20,21 +20,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import require_owner
 from database import get_db
 from models import AssetSnapshot
-from routers.deps import get_asset_or_404, get_owner_scope
+from routers.deps import get_asset_or_404
 from schemas import SnapshotCreate, SnapshotRead
 
-router = APIRouter(prefix="/assets/{asset_id}/snapshots", tags=["snapshots"])
+router = APIRouter(
+    prefix="/assets/{asset_id}/snapshots",
+    tags=["snapshots"],
+    dependencies=[Depends(require_owner)],
+)
 
 
 @router.post("", response_model=SnapshotRead, status_code=status.HTTP_201_CREATED)
 async def create_snapshot(
-    asset_id: uuid.UUID,
-    payload: SnapshotCreate,
-    db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_owner),
+    asset_id: uuid.UUID, payload: SnapshotCreate, db: AsyncSession = Depends(get_db)
 ):
-    await get_asset_or_404(asset_id, db, scope="real")
-    snapshot = AssetSnapshot(asset_id=asset_id, owner="real", **payload.model_dump())
+    await get_asset_or_404(asset_id, db)
+    snapshot = AssetSnapshot(asset_id=asset_id, **payload.model_dump())
     db.add(snapshot)
     try:
         await db.commit()
@@ -49,12 +50,8 @@ async def create_snapshot(
 
 
 @router.get("", response_model=list[SnapshotRead])
-async def list_snapshots(
-    asset_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    scope: str = Depends(get_owner_scope),
-):
-    await get_asset_or_404(asset_id, db, scope=scope)
+async def list_snapshots(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    await get_asset_or_404(asset_id, db)
     result = await db.execute(
         select(AssetSnapshot)
         .where(AssetSnapshot.asset_id == asset_id)
@@ -65,19 +62,15 @@ async def list_snapshots(
 
 @router.post("/upsert", response_model=SnapshotRead)
 async def upsert_snapshot(
-    asset_id: uuid.UUID,
-    payload: SnapshotCreate,
-    db: AsyncSession = Depends(get_db),
-    _: bool = Depends(require_owner),
+    asset_id: uuid.UUID, payload: SnapshotCreate, db: AsyncSession = Depends(get_db)
 ):
-    """Insert or update a snapshot for the given asset + date. Auth required."""
-    await get_asset_or_404(asset_id, db, scope="real")
+    """Insert or update a snapshot for the given asset + date."""
+    await get_asset_or_404(asset_id, db)
 
     stmt = (
         pg_insert(AssetSnapshot)
         .values(
             asset_id=asset_id,
-            owner="real",
             snapshot_date=payload.snapshot_date,
             balance=payload.balance,
         )

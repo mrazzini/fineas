@@ -1,15 +1,15 @@
 """
-POST /ingest — run free-form text through the LangGraph ingestion pipeline.
-POST /ingest/apply — write human-approved data to the database (Phase 4 HITL).
+POST /ingest        — parse free-form text via LangGraph (stateless, no auth).
+POST /ingest/apply  — write human-approved data to the DB (auth required).
 
-Route summary:
-  POST /ingest        → 200 IngestResponse | 422 (FastAPI validation) | 500
-  POST /ingest/apply  → 200 ApplyResponse  | 422 | 500
+Routes:
+  POST /ingest        -> 200 IngestResponse | 422 | 500
+  POST /ingest/apply  -> 200 ApplyResponse  | 401 | 422 | 500
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent import build_apply_graph, build_context_ingest_graph
+from agent import build_apply_graph, ingest_graph_with_context
 from auth import require_owner
 from database import get_db
 from schemas import ApplyRequest, ApplyResponse, IngestRequest, IngestResponse
@@ -18,29 +18,18 @@ router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
 @router.post("", response_model=IngestResponse)
-async def ingest(
-    payload: IngestRequest,
-    db: AsyncSession = Depends(get_db),
-) -> IngestResponse:
-    """
-    Parse free-form text into structured asset + snapshot data.
+async def ingest(payload: IngestRequest) -> IngestResponse:
+    """Parse free-form text into structured asset + snapshot data.
 
-    The request body is a single `text` field — anything from a sentence like
-    "My Vanguard ETF is worth €12,578 as of February 2026" to a pasted CSV.
-
-    Existing portfolio assets are injected into the LLM prompt so the model
-    can match the user's intent to an already-known asset (e.g. "ETF" →
-    "Global Equity ETF") instead of creating duplicates.  When the match is
-    ambiguous, `ambiguous_assets` in the response lists the candidates for
-    the user to resolve in the UI before confirming.
-
-    `is_valid: true` means everything parsed cleanly and is ready to be
-    applied via POST /ingest/apply.
+    Stateless: any existing-asset context for LLM deduplication must be
+    supplied inline via `existing_assets`. No DB read, no auth — usable by
+    anonymous demo visitors and the authed owner alike.
     """
     try:
-        graph = build_context_ingest_graph(db)
-        final_state = await graph.ainvoke({
+        existing = [a.model_dump() for a in payload.existing_assets]
+        final_state = await ingest_graph_with_context.ainvoke({
             "raw_text": payload.text,
+            "existing_assets": existing,
             "parsed_assets": [],
             "parsed_snapshots": [],
             "validated_assets": [],
@@ -75,18 +64,12 @@ async def apply_ingest(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(require_owner),
 ) -> ApplyResponse:
-    """
-    Write human-approved validated data to the database.
-
-    This is the second step of the HITL flow:
-      1. POST /ingest → parse + validate (no DB writes)
-      2. Human reviews and curates the result
-      3. POST /ingest/apply → find-or-create assets, upsert snapshots
-    """
+    """Write human-approved validated data to the database."""
     try:
         graph = build_apply_graph(db)
         final_state = await graph.ainvoke({
             "raw_text": "",
+            "existing_assets": [],
             "parsed_assets": [],
             "parsed_snapshots": [],
             "validated_assets": payload.validated_assets,

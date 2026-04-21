@@ -17,6 +17,8 @@ from services.loader import load_portfolio
 
 router = APIRouter(prefix="/data", tags=["data"])
 
+_SKIP_SENTINEL = "__SKIP__"
+
 
 class AssetEntry(BaseModel):
     """One asset row, already mapped by the user on the /load-data UI."""
@@ -35,6 +37,10 @@ class SnapshotEntry(BaseModel):
 class LoadRequest(BaseModel):
     assets: list[AssetEntry]
     snapshots: list[SnapshotEntry]
+    # Maps a raw snapshot asset_name to a user-chosen target asset name, or
+    # the "__SKIP__" sentinel to drop those snapshots. Applied before the
+    # asset-rename map derived from the assets list.
+    snapshot_name_map: dict[str, str] = Field(default_factory=dict)
 
 
 class LoadSummary(BaseModel):
@@ -49,7 +55,7 @@ async def load_real_data(
     _: bool = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ) -> LoadSummary:
-    """Upsert real portfolio data (owner='real') from the UI's mapped payload."""
+    """Upsert real portfolio data from the UI's mapped payload."""
     rename = {a.original_name: a.name for a in payload.assets if a.original_name != a.name}
 
     assets_rows = [
@@ -62,18 +68,25 @@ async def load_real_data(
         }
         for a in payload.assets
     ]
-    snapshots_rows = [
-        {
-            "asset_name": rename.get(s.asset_name, s.asset_name),
+
+    snapshots_rows: list[dict] = []
+    skipped_by_map: list[str] = []
+    for s in payload.snapshots:
+        mapped = payload.snapshot_name_map.get(s.asset_name, s.asset_name)
+        if mapped == _SKIP_SENTINEL:
+            skipped_by_map.append(
+                f"Skipped by user: '{s.asset_name}' on {s.snapshot_date}"
+            )
+            continue
+        snapshots_rows.append({
+            "asset_name": rename.get(mapped, mapped),
             "snapshot_date": s.snapshot_date,
             "balance": str(s.balance),
-        }
-        for s in payload.snapshots
-    ]
+        })
 
     try:
         result = await load_portfolio(
-            db, assets_rows=assets_rows, snapshots_rows=snapshots_rows, owner="real"
+            db, assets_rows=assets_rows, snapshots_rows=snapshots_rows
         )
     except ValueError as exc:
         await db.rollback()
@@ -84,5 +97,5 @@ async def load_real_data(
     return LoadSummary(
         assets_loaded=result.assets_inserted,
         snapshots_loaded=result.snapshots_inserted,
-        skipped=result.skipped,
+        skipped=skipped_by_map + result.skipped,
     )

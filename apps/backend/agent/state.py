@@ -17,6 +17,8 @@ from typing import TypedDict
 class IngestState(TypedDict):
     # ── Input ──────────────────────────────────────────────────────────────
     raw_text: str             # the user's free-form text or pasted CSV
+    # Optional asset-dedup context supplied by the caller (see ExistingAssetHint).
+    existing_assets: list[dict]
 
     # ── After the [parse] node ─────────────────────────────────────────────
     parsed_assets: list[dict]     # raw LLM-extracted asset definitions
