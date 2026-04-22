@@ -125,14 +125,17 @@ export function useProjection(
   params: ProjectionParams,
   extraKey: unknown = null,
 ) {
-  const ready = assets.length > 0;
+  // The queryFn reads per-asset balances, so the key must include them —
+  // otherwise the first render (with an empty balances map) caches a
+  // zeroed-out result that never refreshes when the balances resolve.
+  const balanceFingerprint = assets.map(
+    (a) => `${a.id}:${latestBalances[a.id]?.balance ?? ""}`,
+  );
+  const ready =
+    assets.length > 0 &&
+    assets.every((a) => latestBalances[a.id] !== undefined);
   return useQuery<ProjectionResponse>({
-    queryKey: [
-      "projection",
-      assets.map((a) => a.id),
-      params,
-      extraKey,
-    ],
+    queryKey: ["projection", balanceFingerprint, params, extraKey],
     enabled: ready,
     queryFn: () => {
       const req: ProjectionRequest = {
